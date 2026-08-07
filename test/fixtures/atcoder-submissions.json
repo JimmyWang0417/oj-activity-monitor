@@ -1,0 +1,4 @@
+[
+  { "id": 72323508, "epoch_second": 1768026887, "problem_id": "ahc059_a", "contest_id": "ahc059", "user_id": "chokudai", "result": "AC" },
+  { "id": 72468628, "epoch_second": 1768472661, "problem_id": "ahc059_a", "contest_id": "ahc059", "user_id": "chokudai", "result": "TLE" }
+]

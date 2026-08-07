@@ -1,0 +1,20 @@
+node_modules/
+coverage/
+*.log
+.DS_Store
+
+# Local planning/collaboration transcripts; may contain user-specific diagnostics.
+cooperate.md
+plan.md
+
+# Local Agent/Skill instructions and tool state.
+.agents/
+.codex/
+.claude/
+skills/
+SKILL.md
+AGENTS.md
+CLAUDE.md
+
+# Optional browser-smoke render.
+test/browser-smoke.png

@@ -1,0 +1,90 @@
+# OJ Activity Monitor
+
+OJ Activity Monitor（仓库名：`oj-activity-monitor`）是一个本地优先的油猴脚本，用一个面板按“人”汇总最近若干天的 Online Judge 活动。发布脚本继续使用原有的 `OJ Monitor` 安装标识，以兼容已经安装的版本和本地数据。目前支持：
+
+- Codeforces Problemset
+- Codeforces Gym（与 Problemset 全程分开）
+- AtCoder
+- VJudge
+- 洛谷
+- QOJ
+
+每个监测分组表示一个人，分组名称和各网站用户名都可编辑。面板提供 GitHub 风格热力图、每日过题数/提交数、跨分组比较、来源筛选和单日提交明细。热力图可在“通过题数/提交次数”间切换，逐日统计可折叠；网站/来源筛选会同时更新热力图、分组比较汇总和提交明细。
+
+## 安装
+
+1. 在浏览器安装 Tampermonkey 或兼容的 userscript 管理器。
+2. 打开 [`dist/oj-monitor.user.js`](dist/oj-monitor.user.js) 的原始内容并安装。
+3. 进入 Codeforces、AtCoder、VJudge、洛谷或 QOJ 任一受支持页面。
+4. 点击右上角“`OJ 监测`”，或从油猴菜单选择“打开 OJ 监测面板”。
+5. 创建以被监测者姓名命名的分组，再添加网站用户名。Codeforces 可分别启用 Problemset 和 Gym。
+
+脚本不需要被监测者登录。洛谷提交记录要求脚本安装者在当前浏览器中登录，并且本地账号有权查看对应记录；QOJ 提交列表和用户页也要求脚本安装者先登录 QOJ。洛谷会话代理只在规范站点 `https://www.luogu.com.cn/` 注册；裸域 `https://luogu.com.cn/` 会跨源跳转到 `www`，不能作为已登录会话标签页。
+
+## 浏览器会话与站点验证
+
+选择 userscript 的原因，是让请求从用户已正常访问 OJ 的浏览器环境发出：
+
+- 对洛谷/QOJ 的登录受限请求，脚本在目标标签页注入一个仅允许白名单同源 GET 的主世界请求端点，以该页面的 `fetch(..., { credentials: "include" })` 和第一方 Cookie 发出请求；端点不读取或传递 Cookie 内容。
+- 跨域接口使用 `GM_xmlhttpRequest`，并在 Tampermonkey 5.2+ 显式把目标 OJ 作为 Cookie 分区的顶层站点，以尽量复用该站本地会话。
+- Codeforces 同源页面会额外尝试浏览器可见的 Gym 提交补充，并与公开 API 按 submission ID 去重。
+- QOJ 页面同源请求复用本地 `UOJSESSID` 与已经通过的 Cloudflare 浏览器状态；未登录或未过验证时会给出明确提示。
+- 脚本识别 Cloudflare challenge、洛谷网宿 `ws-action: cc` 验证、302 登录跳转及登录/验证 HTML、403 和 429，并显示明确状态，不会把失败解释成零提交或误报为 JSON 结构变化。
+
+这不等于“破解”或保证绕过 Cloudflare。浏览器或扩展版本仍可能限制跨站 Cookie，Cloudflare clearance 也可能要求同源页面环境；遇到验证时，应先直接打开对应 OJ 完成验证，再在该站同源页面重新获取。脚本不会读取、导出或上传 Cookie、密码、Token 或提交源码。
+
+## 数据源与统计口径
+
+| 来源 | 提交数据 | 关键规则 |
+| --- | --- | --- |
+| Codeforces | 官方 `user.status`、`contest.list`；同源 HTML 仅作 Gym 补充 | 使用两份 contest 集合分类，禁止按 ID 位数猜 Gym；`verdict === "OK"` 才算通过 |
+| AtCoder | AtCoderProblems API v3 | 官方用户页独立验证账号；每次 API 请求至少间隔 1 秒；`AC` 才算通过 |
+| VJudge | `/status/data` | 基础窗口最多 200 条，必要时按穷尽结果枚举切片；仍饱和则显示 `partial` |
+| 洛谷 | 用户搜索 API、旧式 `DataResponse` 记录页 | 固定请求规范域 `www.luogu.com.cn`；记录请求同时使用 `_contentOnly=1` 与 `x-luogu-type: content-only`，登录门禁时自动交给已打开的 `www` 洛谷标签页并在页面主世界以第一方 Cookie 执行；HTML 中存在 `script#lentille-context` 时仍作兼容回退，但不把普通 HTML 误报成退出登录；按时间倒序持续分页到窗口起点/末页且不设默认页数上限；数值 `12`、文本 `AC`/`Accepted` 算通过 |
+| QOJ | 登录后 `/submissions?submitter=&page=` HTML | Cloudflare 拦截后台请求时自动交给已打开且通过验证的 QOJ 标签页；支持官方连字符团队账号；按时间边界分页且不设默认页数上限；校验每行提交者；`AC`/`Accepted`（含站点的勾号）或分数恰为 100 才算通过 |
+
+“过题数”是某自然日内获得 Accepted/AC 的不同题目数；同题同日多次 AC 只算一道。跨网站直接求和，不做跨站题目去重。时区可选浏览器本地或 `Asia/Shanghai`。
+
+热力图颜色档位会直接显示精确区间：通过题数为 `0 / 1 / 2–3 / 4–6 / ≥7`，提交次数为 `0 / 1–2 / 3–5 / 6–9 / ≥10`；悬停每天的格子仍会显示两项精确数值。
+
+洛谷记录按时间降序连续分页；只要页内/跨页顺序正常、没有重复或重叠页，并读到早于统计起点的记录（或经末页/总数证明已读完），窗口内提交数和去重 AC 题数就是精确值，不显示 `≥`。任何来源未能证明完整覆盖时，格子和表格中的数字才作为已知下界，以 `≥` 和 `partial` 展示。VJudge 的未知截断不伪造遗漏数；Codeforces 已读到但无法归类的记录单独计入排除记录。
+
+## 本地数据与多标签页
+
+- `GM_*Value` 是配置、提交缓存、每日统计、来源状态和调度状态的唯一真源，可在五个站点间共享。
+- `www.luogu.com.cn` 和 QOJ 标签页会注册同源会话代理；面板可在任意受支持的 OJ 页面打开，登录/验证受限请求通过共享存储交给目标站点标签页的页面主世界执行并返回，不要求在目标页重新打开面板。目标标签页需保持打开并运行同一新版脚本。
+- Firefox 的页面 binding 降级会用 `cloneInto`（可用时）或页面 realm 构造器创建 fetch 参数，避免把油猴 sandbox 对象直接传入 Xray 包装的页面函数。普通 GM 请求默认使用 Tampermonkey 的常规 Cookie jar；只有调用者明确给出分区键时才使用 `cookiePartition`。
+- 提交按账号/网站/来源/月分块，每日统计按分组/账号/来源/年分块。
+- 后续刷新复用已完整覆盖的缓存，只向前重叠一天增量抓取。
+- 全局刷新使用带所有者、代次、到期时间和心跳的共享租约；非 owner 标签页会等待并自动读取共享结果，owner 崩溃且租约过期后自动接管；域名请求串行并共享下一允许请求时间。
+- 只有实际打开的面板会自动获取，最短缓存有效期为 15 分钟；获取过程可取消。
+- 诊断日志只包含来源、状态、耗时、数量、页面 origin、分页停止原因及脱敏传输链。洛谷的 `transportAttempts` 逐跳记录 requested/actual transport、错误状态、HTTP 状态和去除 query/hash 的最终 origin+pathname；若页面传输因不同源或缺少 DOM/CustomEvent 而根本不能尝试，也会以 `actual: "not-attempted"` 和具体原因留痕。主世界安装失败后回退到 Firefox binding 时保留 `fallback` 原因。不包含 Cookie、Token 或完整请求参数。
+
+第三方 [luogu-api-docs](https://0f-0b.github.io/luogu-api-docs/) 将 `/record/list` 明确标为旧式 `DataResponse`：使用 `_contentOnly` 参数或 `x-luogu-type: content-only`；`x-lentille-request` 只适用于 `LentilleDataResponse`。v0.2.10 的真实已登录 Firefox 结果证明 Lentille 头在记录路由只得到无数据 HTML，因此 v0.2.11 恢复旧式协商。匿名请求会先跳转到 `/auth/login`，其最终页面格式不能用于反推已认证 `/record/list` 的响应契约。
+
+## 开发
+
+项目无运行时或构建依赖，需要 Node.js 20 或更高版本：
+
+```bash
+npm test
+npm run build
+npm run check
+```
+
+构建脚本会把 `src/` 中的 CommonJS 模块打成单个 [`dist/oj-monitor.user.js`](dist/oj-monitor.user.js)，并校验 userscript metadata、授权域名以及是否残留本地 `require()`。
+
+测试包含 URL/命名空间、判题映射、时区聚合、存储校验、租约/限速、五个平台 fixture、分页完整性/截断、刷新隔离和视图模型。`test/browser-smoke.html` 可在本地浏览器中加载构建产物，使用模拟 GM 存储检查完整面板布局。
+
+## 已知限制
+
+- AtCoder 提交依赖第三方 AtCoderProblems；数据源不可用时不会遍历全站比赛页降级。
+- VJudge 的单过滤窗口硬上限为 200，极高频用户即使切片仍可能只得到下界。
+- Codeforces 私有/受限 Gym 能否补充取决于本地账号权限和浏览器同源会话；页面补充被明确标成降级数据。
+- 洛谷数据可见性由本地登录状态、被监测者设置和站点权限共同决定。
+- QOJ 目前关闭匿名提交列表；没有登录或 Cloudflare 会话时无法采集。解析契约依据 QOJ 当前页面行为与其 UOJ 开源基线，真实登录页若改版会标记为结构变化而不会显示零。
+- 首期不支持 Codeforces Group、Polygon、Acmsguru 等额外命名空间。
+
+## 许可证与来源
+
+项目采用 [GPL-3.0-only](LICENSE)。跨域 Promise 包装器参考并改写自 GPL-3.0 的 OJBetter/Codeforces Better/AtCoder Better；完整说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

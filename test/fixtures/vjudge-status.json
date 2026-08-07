@@ -1,0 +1,7 @@
+{
+  "data": [
+    { "statusType": 0, "processing": false, "runId": 515650, "time": 1342848775000, "oj": "SGU", "problemId": 13983, "probNum": "519", "status": "Accepted" },
+    { "statusType": 2, "processing": false, "runId": 515649, "time": 1342848774000, "oj": "SGU", "problemId": 13983, "probNum": "519", "status": "Submit Failed" },
+    { "statusType": 0, "processing": true, "runId": 515648, "time": 1342848773000, "oj": "SGU", "problemId": 13984, "probNum": "520", "status": "Accepted" }
+  ]
+}

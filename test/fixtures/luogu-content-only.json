@@ -1,0 +1,12 @@
+{
+  "code": 200,
+  "currentData": {
+    "records": {
+      "count": 2,
+      "result": [
+        { "id": 10001, "submitTime": 1786000000, "status": 12, "problem": { "pid": "P1001", "title": "A+B Problem" } },
+        { "id": 10002, "submitTime": 1785999000, "status": 14, "problem": { "pid": "P1002", "title": "过河卒" } }
+      ]
+    }
+  }
+}
