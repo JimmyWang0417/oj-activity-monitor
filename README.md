@@ -41,7 +41,7 @@ OJ Activity Monitor（仓库名：`oj-activity-monitor`）是一个本地优先�
 | AtCoder | AtCoderProblems API v3 | 官方用户页独立验证账号；每次 API 请求至少间隔 1 秒；`AC` 才算通过 |
 | VJudge | `/status/data` | 基础窗口最多 200 条，必要时按穷尽结果枚举切片；仍饱和则显示 `partial` |
 | 洛谷 | 用户搜索 API、旧式 `DataResponse` 记录页 | 固定请求规范域 `www.luogu.com.cn`；记录请求同时使用 `_contentOnly=1` 与 `x-luogu-type: content-only`，登录门禁时自动交给已打开的 `www` 洛谷标签页并在页面主世界以第一方 Cookie 执行；HTML 中存在 `script#lentille-context` 时仍作兼容回退，但不把普通 HTML 误报成退出登录；按时间倒序持续分页到窗口起点/末页且不设默认页数上限；数值 `12`、文本 `AC`/`Accepted` 算通过 |
-| QOJ | 登录后 `/submissions?submitter=&page=` HTML | Cloudflare 拦截后台请求时自动交给已打开且通过验证的 QOJ 标签页；支持官方连字符团队账号；按时间边界分页且不设默认页数上限；校验每行提交者；`AC`/`Accepted`（含站点的勾号）或分数恰为 100 才算通过 |
+| QOJ | 登录后 `/submissions?submitter=&page=` HTML | Cloudflare 拦截后台请求时自动交给已打开且通过验证的 QOJ 标签页；支持官方连字符团队账号；按时间边界分页且不设默认页数上限；从 `.uoj-username`/用户主页链接读取语义提交者，忽略独立的辅助 `#` 后仍做严格等值校验；能证明筛选身份的空结果页精确记为 0；`AC`/`Accepted`（含站点的勾号）或分数恰为 100 才算通过 |
 
 “过题数”是某自然日内获得 Accepted/AC 的不同题目数；同题同日多次 AC 只算一道。跨网站直接求和，不做跨站题目去重。时区可选浏览器本地或 `Asia/Shanghai`。
 
@@ -82,7 +82,7 @@ npm run check
 - VJudge 的单过滤窗口硬上限为 200，极高频用户即使切片仍可能只得到下界。
 - Codeforces 私有/受限 Gym 能否补充取决于本地账号权限和浏览器同源会话；页面补充被明确标成降级数据。
 - 洛谷数据可见性由本地登录状态、被监测者设置和站点权限共同决定。
-- QOJ 目前关闭匿名提交列表；没有登录或 Cloudflare 会话时无法采集。解析契约依据 QOJ 当前页面行为与其 UOJ 开源基线，真实登录页若改版会标记为结构变化而不会显示零。
+- QOJ 目前关闭匿名提交列表；没有登录或 Cloudflare 会话时无法采集。解析契约依据 QOJ 当前页面行为与其 UOJ 开源基线；只有同时确认 `/submissions` 筛选表单、目标用户名和空结果页面身份时才显示精确零，任意无表头 HTML 仍标记为结构变化。
 - 首期不支持 Codeforces Group、Polygon、Acmsguru 等额外命名空间。
 
 ## 许可证与来源

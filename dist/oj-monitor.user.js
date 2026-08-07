@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OJ Monitor
 // @namespace    https://github.com/oj-monitor/userscript
-// @version      0.2.11
+// @version      0.2.12
 // @description  在本地浏览器中按人监测多个 OJ 的近期提交与过题情况
 // @author       OJ Monitor contributors
 // @license      GPL-3.0-only
@@ -56,7 +56,7 @@ const ui = __require("src/ui.js");
 const viewModel = __require("src/view-model.js");
 
 const api = Object.freeze({
-    version: "0.2.11",
+    version: "0.2.12",
   ...adapters,
   ...app,
   ...core,
@@ -2095,6 +2095,79 @@ function parseHref(cellHtml, expression) {
   return null;
 }
 
+function attributeValue(tagHtml, name) {
+  const expression = new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i");
+  const match = String(tagHtml).match(expression);
+  return match ? decodeHtml(match[1] ?? match[2] ?? match[3] ?? "") : undefined;
+}
+
+function classText(html, className) {
+  const source = String(html);
+  const openingTag = /<([a-z][\w:-]*)\b[^>]*>/gi;
+  let opening;
+  while ((opening = openingTag.exec(source))) {
+    const classes = attributeValue(opening[0], "class");
+    if (!classes || !classes.split(/\s+/).includes(className)) continue;
+    const closingTag = new RegExp(`<\\/${opening[1]}\\s*>`, "i");
+    const closing = source.slice(openingTag.lastIndex).match(closingTag);
+    if (!closing) continue;
+    return stripHtml(source.slice(openingTag.lastIndex, openingTag.lastIndex + closing.index));
+  }
+  return "";
+}
+
+function normalizeSubmitterLabel(value) {
+  return stripHtml(value).replace(/\s+#\s*$/, "").trim();
+}
+
+function parseQojSubmitter(cellHtml) {
+  const semantic = normalizeSubmitterLabel(classText(cellHtml, "uoj-username"));
+  if (semantic) return semantic;
+  const profileLink = parseHref(cellHtml, /\/user\/profile\/([^/?#]+)(?:[/?#]|$)/i);
+  if (profileLink) {
+    const label = normalizeSubmitterLabel(profileLink.label);
+    if (label) return label;
+    try {
+      return decodeURIComponent(profileLink.match[1]);
+    } catch {
+      return profileLink.match[1];
+    }
+  }
+  return normalizeSubmitterLabel(cellHtml);
+}
+
+function isQojEmptySubmissionPage(source, options = {}) {
+  if (/href=["'][^"']*\/submission\/\d+(?:[/?#"'])/i.test(source)) return false;
+  const expected = String(options.username || "").toLowerCase();
+  if (!expected) return false;
+
+  let matchingFilter = false;
+  const formExpression = /<form\b[^>]*>[\s\S]*?<\/form>/gi;
+  let form;
+  while ((form = formExpression.exec(source))) {
+    const opening = form[0].match(/^<form\b[^>]*>/i)?.[0] || "";
+    const action = attributeValue(opening, "action");
+    if (!action) continue;
+    try {
+      if (new URL(action, options.base || "https://qoj.ac").pathname !== "/submissions") continue;
+    } catch {
+      continue;
+    }
+    const inputs = form[0].match(/<input\b[^>]*>/gi) || [];
+    matchingFilter = inputs.some((input) =>
+      String(attributeValue(input, "name") || "").toLowerCase() === "submitter"
+      && String(attributeValue(input, "value") || "").toLowerCase() === expected
+    );
+    if (matchingFilter) break;
+  }
+  if (!matchingFilter) return false;
+
+  const text = stripHtml(source);
+  const explicitEmpty = /(?:\bno\s+submissions?(?:\s+found)?\b|\bnothing\s+found\b|\bno\s+records?(?:\s+found)?\b|暂无(?:任何)?提交|没有(?:任何)?提交(?:记录)?|无提交记录)/i.test(text);
+  const submissionsTitle = /<title\b[^>]*>[\s\S]*?submissions?[\s\S]*?<\/title>/i.test(source);
+  return explicitEmpty || submissionsTitle;
+}
+
 function parseQojSubmissionsHtml(html, options = {}) {
   const source = String(html);
   if (/<form\b[^>]*(?:action=["']\/login|id=["']form-login)/i.test(source) || /href=["']\/login["'][^>]*>\s*(?:login|登录)/i.test(source) && !/<table\b/i.test(source)) {
@@ -2102,6 +2175,9 @@ function parseQojSubmissionsHtml(html, options = {}) {
   }
   const rows = [...source.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)].map((match) => match[1]);
   const headerRow = rows.find((row) => /<th\b/i.test(row));
+  if (!headerRow && isQojEmptySubmissionPage(source, options)) {
+    return { submissions: [], hasNext: false, signature: "" };
+  }
   if (!headerRow) throw new OJMonitorError("schema-changed", "QOJ 提交页缺少表头");
   const headers = extractCells(headerRow, "th");
   const columnIndex = {};
@@ -2124,7 +2200,7 @@ function parseQojSubmissionsHtml(html, options = {}) {
     const submittedAt = parseQojTime(cells[columnIndex.submitTime]);
     if (!Number.isFinite(submittedAt)) throw new OJMonitorError("schema-changed", `QOJ submission ${idLink.match[1]} 的提交时间无法解析`);
     const verdict = stripHtml(cells[columnIndex.result]);
-    const submitter = stripHtml(cells[columnIndex.submitter]);
+    const submitter = parseQojSubmitter(cells[columnIndex.submitter]);
     if (options.username && submitter.toLowerCase() !== String(options.username).toLowerCase()) {
       throw new OJMonitorError("schema-changed", `QOJ 提交者筛选未生效：期望 ${options.username}，实际为 ${submitter || "空"}`);
     }
@@ -2346,6 +2422,7 @@ module.exports = {
   headerKind,
   isAcceptedQojVerdict,
   parseQojSubmissionsHtml,
+  parseQojSubmitter,
   parseQojTime,
   qojFailureWarning,
   stripHtml

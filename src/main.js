@@ -12,7 +12,7 @@ const ui = require("./ui");
 const viewModel = require("./view-model");
 
 const api = Object.freeze({
-    version: "0.2.11",
+    version: "0.2.12",
   ...adapters,
   ...app,
   ...core,

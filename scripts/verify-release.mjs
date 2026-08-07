@@ -17,7 +17,7 @@ const required = [
   "// @connect      kenkoooo.com",
   "// @match        https://qoj.ac/*",
   "// @connect      qoj.ac",
-  "version: \"0.2.11\"",
+  "version: \"0.2.12\"",
   "x-luogu-type",
   "class SiteSessionBridge",
   "function installPageRealmEndpoint",

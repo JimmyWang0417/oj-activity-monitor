@@ -384,6 +384,49 @@ test("QOJ accepts official hyphenated team usernames and rejects ignored filters
   );
 });
 
+test("QOJ extracts the semantic submitter instead of adjacent hash markers", () => {
+  const row = (submitter) => `<table><thead><tr><th>ID</th><th>Problem</th><th>Submitter</th><th>Result</th><th>Submit time</th></tr></thead><tbody><tr><td><a href="/submission/5">#5</a></td><td><a href="/problem/3">#3</a></td><td>${submitter}</td><td>100</td><td>2026-08-07 12:00:00</td></tr></tbody></table>`;
+  const structured = row(`<a href="/user/profile/Zenith"><span class="uoj-username">Zenith</span></a> <a href="/submissions?submitter=Zenith">#</a>`);
+  const parsed = parseQojSubmissionsHtml(structured, { ...range, username: "Zenith", page: 1, base: "https://qoj.ac" });
+  assert.equal(parsed.submissions.length, 1);
+  assert.equal(parsed.submissions[0].username, "Zenith");
+
+  const plainFallback = parseQojSubmissionsHtml(row("Zenith #"), { ...range, username: "Zenith", page: 1, base: "https://qoj.ac" });
+  assert.equal(plainFallback.submissions.length, 1);
+  assert.throws(
+    () => parseQojSubmissionsHtml(row(`<span class="uoj-username">Zenith2</span> #`), { ...range, username: "Zenith", page: 1 }),
+    (error) => error.status === "schema-changed" && /实际为 Zenith2/.test(error.message)
+  );
+});
+
+test("QOJ proves a filtered empty page without hiding arbitrary schema changes", async () => {
+  const emptyHtml = `<html><head><title>Submissions - QOJ.ac</title></head><body><form action="/submissions" method="get"><input name="submitter" value="NoRecord"><button>Search</button></form><p class="text-muted">No submissions found.</p></body></html>`;
+  const parsed = parseQojSubmissionsHtml(emptyHtml, { ...range, username: "NoRecord", page: 1, base: "https://qoj.ac" });
+  assert.deepEqual(parsed, { submissions: [], hasNext: false, signature: "" });
+
+  const client = {
+    global: { location: { hostname: "qoj.ac", origin: "https://qoj.ac" } },
+    request: async (url) => url.includes("/user/profile/")
+      ? { status: 200, text: "<h1>NoRecord</h1>" }
+      : { status: 200, text: emptyHtml }
+  };
+  const result = await new QojAdapter({ client, limiter: { waitTurn: async () => {} } }).fetchSubmissions({ ...range, username: "NoRecord" });
+  assert.equal(result.status, "ok");
+  assert.equal(result.submissions.length, 0);
+  assert.equal(result.diagnostics.stopReason, "empty-page");
+  assert.equal(result.diagnostics.pagesFetched, 1);
+
+  assert.throws(
+    () => parseQojSubmissionsHtml("<html><h1>Submissions temporarily unavailable</h1></html>", { ...range, username: "NoRecord", page: 1 }),
+    (error) => error.status === "schema-changed" && /缺少表头/.test(error.message)
+  );
+  const wrongFilter = emptyHtml.replace('value="NoRecord"', 'value="SomeoneElse"');
+  assert.throws(
+    () => parseQojSubmissionsHtml(wrongFilter, { ...range, username: "NoRecord", page: 1 }),
+    (error) => error.status === "schema-changed" && /缺少表头/.test(error.message)
+  );
+});
+
 test("QOJ uses same-origin session and paginates until the visible last page", async () => {
   const fixtureHtml = textFixture("qoj-submissions.html");
   const urls = [];
