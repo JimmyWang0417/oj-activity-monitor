@@ -2,6 +2,8 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const { OJMonitorApplication } = require("../src/app");
 
 function applicationFixture(overrides = {}) {
@@ -66,4 +68,22 @@ test("application refresh takes over after the previous lease expires", async ()
   assert.equal(serviceCalls, 1);
   assert.deepEqual(events, [{ type: "lease-wait" }, { type: "lease-takeover" }]);
   assert.equal(app.abortController, null);
+});
+
+test("NowCoder metadata and release source contract stays present", () => {
+  const root = path.resolve(__dirname, "..");
+  const metadata = fs.readFileSync(path.join(root, "src", "metadata.txt"), "utf8");
+  const releaseVerifier = fs.readFileSync(path.join(root, "scripts", "verify-release.mjs"), "utf8");
+  const mainSource = fs.readFileSync(path.join(root, "src", "main.js"), "utf8");
+  const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+
+  assert.equal(packageJson.version, "0.2.14");
+  assert.match(mainSource, /version:\s*"0\.2\.14"/);
+  assert.match(metadata, /^\/\/ @version\s+0\.2\.14$/m);
+  assert.match(metadata, /^\/\/ @match\s+https:\/\/ac\.nowcoder\.com\/\*$/m);
+  assert.match(metadata, /^\/\/ @connect\s+ac\.nowcoder\.com$/m);
+  assert.doesNotMatch(metadata, /www\.nowcoder\.com/);
+  assert.match(releaseVerifier, /class NowcoderAdapter/);
+  assert.match(releaseVerifier, /function parseNowcoderRatingHtml/);
+  assert.match(releaseVerifier, /https:\/\/ac\.nowcoder\.com\/\*/);
 });

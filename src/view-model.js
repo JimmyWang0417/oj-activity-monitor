@@ -10,6 +10,7 @@ const SOURCE_FILTERS = Object.freeze([
   { id: "atcoder", label: "AtCoder" },
   { id: "vjudge", label: "VJudge" },
   { id: "luogu", label: "洛谷" },
+  { id: "nowcoder", label: "牛客" },
   { id: "qoj", label: "QOJ" }
 ]);
 
@@ -84,6 +85,7 @@ function buildDailyRows(stats, groupId, dateKeys) {
     atcoder: sourceCell(stats, groupId, date, "atcoder"),
     vjudge: sourceCell(stats, groupId, date, "vjudge"),
     luogu: sourceCell(stats, groupId, date, "luogu"),
+    nowcoder: sourceCell(stats, groupId, date, "nowcoder"),
     qoj: sourceCell(stats, groupId, date, "qoj"),
     total: combineDaily(stats, groupId, date, "all")
   }));

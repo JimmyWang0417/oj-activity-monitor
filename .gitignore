@@ -6,6 +6,8 @@ coverage/
 # Local planning/collaboration transcripts; may contain user-specific diagnostics.
 cooperate.md
 plan.md
+outputs/
+work/
 
 # Local Agent/Skill instructions and tool state.
 .agents/

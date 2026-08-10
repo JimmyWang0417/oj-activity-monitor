@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OJ Monitor
 // @namespace    https://github.com/oj-monitor/userscript
-// @version      0.2.12
+// @version      0.2.14
 // @description  在本地浏览器中按人监测多个 OJ 的近期提交与过题情况
 // @author       OJ Monitor contributors
 // @license      GPL-3.0-only
@@ -13,6 +13,7 @@
 // @match        https://vjudge.net/*
 // @match        https://luogu.com.cn/*
 // @match        https://www.luogu.com.cn/*
+// @match        https://ac.nowcoder.com/*
 // @match        https://qoj.ac/*
 // @run-at       document-start
 // @noframes
@@ -35,5 +36,6 @@
 // @connect      vjudge.net
 // @connect      luogu.com.cn
 // @connect      www.luogu.com.cn
+// @connect      ac.nowcoder.com
 // @connect      qoj.ac
 // ==/UserScript==
