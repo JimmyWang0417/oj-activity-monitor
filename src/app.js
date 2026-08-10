@@ -21,7 +21,7 @@ class OJMonitorApplication {
       siteBridge: this.siteBridge,
       onRetry: async (url) => {
         const hostname = new URL(url, globalObject.location?.href).hostname;
-        const intervals = { "codeforces.com": 2000, "kenkoooo.com": 1000, "atcoder.jp": 500, "vjudge.net": 500, "www.luogu.com.cn": 500, "luogu.com.cn": 500, "qoj.ac": 750 };
+        const intervals = { "codeforces.com": 2000, "kenkoooo.com": 1000, "atcoder.jp": 500, "vjudge.net": 500, "www.luogu.com.cn": 500, "luogu.com.cn": 500, "ac.nowcoder.com": 1000, "qoj.ac": 750 };
         await this.limiter.waitTurn(hostname, intervals[hostname] || 500);
       }
     });

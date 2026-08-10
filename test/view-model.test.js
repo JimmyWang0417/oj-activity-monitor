@@ -29,6 +29,16 @@ test("daily rows keep QOJ separate while including it in totals", () => {
   assert.equal(row.total.submissionCount, 4);
 });
 
+test("daily rows keep NowCoder separate while including it in totals", () => {
+  const stats = [stat({ judge: "nowcoder", scope: "default", submissionCount: 5, solvedCount: 2 })];
+  const row = buildDailyRows(stats, "g", ["2026-08-07"])[0];
+  assert.equal(row.nowcoder.submissionCount, 5);
+  assert.equal(row.nowcoder.solvedCount, 2);
+  assert.equal(row.total.submissionCount, 5);
+  const series = buildHeatmapSeries(stats, [{ id: "g", name: "Alice" }], ["2026-08-07"], { source: "nowcoder", metric: "solved" });
+  assert.equal(series[0].days[0].value, 2);
+});
+
 test("daily and group rows preserve partial lower-bound state", () => {
   const stats = [stat(), stat({ judge: "atcoder", scope: "default", accountId: "b", submissionCount: 3, solvedCount: 1, status: "partial", coverageComplete: false })];
   const daily = buildDailyRows(stats, "g", ["2026-08-07"])[0];

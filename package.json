@@ -1,6 +1,6 @@
 {
   "name": "oj-activity-monitor",
-  "version": "0.2.12",
+  "version": "0.2.14",
   "private": true,
   "description": "Local-first multi-user Online Judge activity monitor for Tampermonkey",
   "license": "GPL-3.0-only",

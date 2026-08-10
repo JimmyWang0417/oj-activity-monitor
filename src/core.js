@@ -1,6 +1,6 @@
 "use strict";
 
-const JUDGES = Object.freeze(["codeforces", "atcoder", "vjudge", "luogu", "qoj"]);
+const JUDGES = Object.freeze(["codeforces", "atcoder", "vjudge", "luogu", "nowcoder", "qoj"]);
 const SOURCE_SCOPES = Object.freeze(["problemset", "gym", "default"]);
 const SOURCE_STATUSES = Object.freeze([
   "ok",
@@ -91,6 +91,7 @@ function inferAccepted(judge, verdict, accepted) {
     if (/^(?:AC|Accepted)(?:!|\s*[✓✔√])?$/i.test(text)) return true;
     if (/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(text)) return Number(text) === 100;
   }
+  if (judge === "nowcoder") return text === "答案正确";
   if (judge === "luogu") return /^(?:AC|Accepted|recordStatus:12)$/i.test(text);
   return false;
 }

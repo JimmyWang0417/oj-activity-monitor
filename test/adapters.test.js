@@ -7,6 +7,7 @@ const path = require("node:path");
 const { AtCoderAdapter, normalizeAtCoderSubmission } = require("../src/adapters/atcoder");
 const { CodeforcesAdapter, parseVisibleSubmissionHtml } = require("../src/adapters/codeforces");
 const { DEFAULT_MAX_PAGES, diagnosticFinalLocation, diagnosticReason, findRecordArray, findRecordPage, LuoguAdapter, normalizeLuoguSubmission, parseLentilleContextHtml, parseLuoguContentResponse } = require("../src/adapters/luogu");
+const { NowcoderAdapter, isAcceptedNowcoderVerdict, parseNowcoderPracticeHtml, parseNowcoderRatingHtml, parseNowcoderTime } = require("../src/adapters/nowcoder");
 const { QojAdapter, isAcceptedQojVerdict, parseQojSubmissionsHtml, parseQojTime } = require("../src/adapters/qoj");
 const { RESULT_FILTERS, VJudgeAdapter, normalizeVJudgeSubmission } = require("../src/adapters/vjudge");
 const { MemoryBackend, Store } = require("../src/storage");
@@ -17,6 +18,47 @@ const range = {
   groupId: "group", accountId: "account", username: "user", scope: "default",
   from: 0, to: Date.parse("2030-01-01T00:00:00Z")
 };
+
+const nowcoderRange = {
+  groupId: "group", accountId: "nowcoder-account", username: "123456789", scope: "default",
+  from: 0, to: Date.parse("2030-01-01T00:00:00Z")
+};
+
+function nowcoderClient(pages) {
+  const calls = [];
+  return {
+    calls,
+    global: {},
+    request: async (url) => {
+      calls.push(url);
+      const page = Number(new URL(url).searchParams.get("page"));
+      const text = typeof pages === "function" ? pages(page) : pages[page];
+      return { status: 200, finalUrl: url, text };
+    }
+  };
+}
+
+function examplePracticeHtml(html = textFixture("nowcoder-practice-coding.html")) {
+  return html
+    .replaceAll("123456789", "900000000000000001")
+    .replaceAll("Alice &amp; Bob", "Example_user");
+}
+
+function nowcoderIdentifierClient(ratingHtml, pages) {
+  const calls = [];
+  return {
+    calls,
+    global: {},
+    request: async (url) => {
+      calls.push(url);
+      const parsed = new URL(url);
+      const text = parsed.pathname === "/acm/contest/rating-index"
+        ? ratingHtml
+        : pages[Number(parsed.searchParams.get("page"))];
+      return { status: 200, finalUrl: url, text };
+    }
+  };
+}
 
 test("Codeforces mixed API fixture splits into authoritative Problemset and Gym channels", () => {
   const adapter = new CodeforcesAdapter({ client: {}, store: new Store(new MemoryBackend()) });
@@ -352,6 +394,222 @@ test("Luogu default pagination is bounded by the requested date rather than a pa
   assert.equal(result.diagnostics.stopReason, "reached-from");
   assert.equal(result.coverage.reason, undefined);
   assert.equal(result.submissions.length, 90);
+});
+
+test("NowCoder fixture maps semantic columns, HTML entities, UTC+8 assumption and exact acceptance", () => {
+  const html = textFixture("nowcoder-practice-coding.html").replace("<body>", "<body><table><tr><th>无关表头</th></tr></table>");
+  const parsed = parseNowcoderPracticeHtml(html, { ...nowcoderRange, page: 1 });
+  assert.equal(parsed.hasNext, true);
+  assert.equal(parsed.totalPages, 2);
+  assert.equal(parsed.displayName, "Alice & Bob");
+  assert.deepEqual(parsed.submissions.map((item) => item.submissionId), ["103", "102", "101"]);
+  assert.deepEqual(parsed.submissions.map((item) => item.accepted), [true, false, false]);
+  assert.equal(parsed.submissions[0].problemKey, "nowcoder:200");
+  assert.equal(parsed.submissions[0].problemName, "A & B");
+  assert.equal(parsed.submissions[1].problemName, "Wrong <answer>");
+  assert.equal(parsed.submissions[0].problemUrl, "https://ac.nowcoder.com/acm/problem/200");
+  assert.equal(parsed.submissions[0].submittedAt, Date.parse("2026-08-07T11:20:30+08:00"));
+  assert.equal(parseNowcoderTime("2026-08-07 00:00:00"), Date.parse("2026-08-07T00:00:00+08:00"));
+  assert.deepEqual(["答案正确", " 答案正确 ", "答案错误", "运行超时", "100"].map(isAcceptedNowcoderVerdict), [true, true, false, false, false]);
+});
+
+test("NowCoder Rating parser resolves exact case-folded usernames without dropping underscores", () => {
+  const html = textFixture("nowcoder-rating-search.html");
+  assert.deepEqual(parseNowcoderRatingHtml(html, "Example_user"), { uid: "900000000000000001", canonicalName: "Example_user" });
+  assert.deepEqual(parseNowcoderRatingHtml(html, "example_USER"), { uid: "900000000000000001", canonicalName: "Example_user" });
+  assert.throws(() => parseNowcoderRatingHtml(html, "Exampleuser"), (error) => error.status === "not-found");
+  assert.throws(() => parseNowcoderRatingHtml(html, "Example"), (error) => error.status === "not-found");
+
+  const duplicateSameUid = html.replace("</tbody>", '<tr><td>1</td><td><a href="/acm/contest/profile/900000000000000001"><span>Example_user</span></a></td><td></td><td></td><td>1</td></tr></tbody>');
+  assert.equal(parseNowcoderRatingHtml(duplicateSameUid, "Example_user").uid, "900000000000000001");
+  const ambiguous = html.replace("</tbody>", '<tr><td>2</td><td><a href="/acm/contest/profile/900000000000000002"><span>example_USER</span></a></td><td></td><td></td><td>2</td></tr></tbody>');
+  assert.throws(() => parseNowcoderRatingHtml(ambiguous, "Example_user"), (error) => error.status === "not-found" && /多个 UID/.test(error.message));
+});
+
+test("NowCoder username resolution is shared, cached and preserves the canonical competition name", async () => {
+  const rating = textFixture("nowcoder-rating-search.html");
+  const profile = examplePracticeHtml();
+  const client = nowcoderIdentifierClient(rating, { 1: profile });
+  const adapter = new NowcoderAdapter({ client, limiter: { waitTurn: async () => {} } });
+
+  assert.deepEqual(await adapter.resolveIdentifier("Example_user"), { uid: "900000000000000001", canonicalName: "Example_user" });
+  assert.deepEqual(await adapter.resolveIdentifier("example_USER"), { uid: "900000000000000001", canonicalName: "Example_user" });
+  const validation = await adapter.validateUser("example_USER");
+  assert.deepEqual(validation, { exists: true, canonicalUsername: "900000000000000001", displayName: "Example_user", status: "ok" });
+  const ratingCalls = client.calls.filter((url) => new URL(url).pathname === "/acm/contest/rating-index");
+  assert.equal(ratingCalls.length, 1);
+  assert.equal(new URL(ratingCalls[0]).searchParams.get("searchUserName"), "Example_user");
+});
+
+test("NowCoder username resolution fails closed on redirects, missing schema and display mismatch", async () => {
+  const rating = textFixture("nowcoder-rating-search.html");
+  const redirected = new NowcoderAdapter({
+    client: { request: async (url) => ({ status: 200, finalUrl: "https://ac.nowcoder.com/", text: rating }) },
+    limiter: { waitTurn: async () => {} }
+  });
+  assert.equal((await redirected.validateUser("Example_user")).status, "schema-changed");
+
+  for (const finalUrl of [
+    "https://ac.nowcoder.com/acm/contest/rating-index?page=1&pageSize=50",
+    "https://ac.nowcoder.com/acm/contest/rating-index?page=1&pageSize=50&searchUserName=Other_user"
+  ]) {
+    const lostFilter = new NowcoderAdapter({
+      client: { request: async () => ({ status: 200, finalUrl, text: rating }) },
+      limiter: { waitTurn: async () => {} }
+    });
+    assert.equal((await lostFilter.validateUser("Example_user")).status, "schema-changed");
+  }
+
+  const missingSchema = new NowcoderAdapter({
+    client: { request: async (url) => ({ status: 200, finalUrl: url, text: "<html>页面找不到了</html>" }) },
+    limiter: { waitTurn: async () => {} }
+  });
+  assert.equal((await missingSchema.validateUser("Example_user")).status, "schema-changed");
+
+  const wrongDisplayClient = nowcoderIdentifierClient(rating, { 1: examplePracticeHtml().replaceAll("Example_user", "Other_user") });
+  const wrongDisplay = await new NowcoderAdapter({ client: wrongDisplayClient, limiter: { waitTurn: async () => {} } }).validateUser("Example_user");
+  assert.equal(wrongDisplay.status, "schema-changed");
+});
+
+test("NowCoder numeric UIDs bypass Rating lookup", async () => {
+  const client = nowcoderIdentifierClient(textFixture("nowcoder-rating-search.html"), { 1: examplePracticeHtml() });
+  const validation = await new NowcoderAdapter({ client, limiter: { waitTurn: async () => {} } }).validateUser("900000000000000001");
+  assert.equal(validation.status, "ok");
+  assert.equal(validation.canonicalUsername, "900000000000000001");
+  assert.equal(client.calls.length, 1);
+  assert.equal(new URL(client.calls[0]).pathname, "/acm/contest/profile/900000000000000001/practice-coding");
+});
+
+test("NowCoder proves exact zero from identity, semantic headers and submission total without relying on copy", () => {
+  const parsed = parseNowcoderPracticeHtml(textFixture("nowcoder-empty.html"), { ...nowcoderRange, username: "665290627", page: 1 });
+  assert.equal(parsed.explicitEmpty, true);
+  assert.deepEqual(parsed.submissions, []);
+
+  const unproved = textFixture("nowcoder-empty.html").replace('<div class="state-num">0</div><span>次提交</span>', '<div class="state-num">1</div><span>次提交</span>');
+  assert.throws(
+    () => parseNowcoderPracticeHtml(unproved, { ...nowcoderRange, username: "665290627", page: 1 }),
+    (error) => error.status === "schema-changed"
+  );
+});
+
+test("NowCoder rejects invalid UIDs without a request and detects redirects or identity mismatch", async () => {
+  let called = false;
+  const invalid = await new NowcoderAdapter({ client: { request: async () => { called = true; } } }).fetchSubmissions({ ...nowcoderRange, username: "0" });
+  assert.equal(invalid.status, "not-found");
+  const tooLong = await new NowcoderAdapter({ client: { request: async () => { called = true; } } }).fetchSubmissions({ ...nowcoderRange, username: "1234567890123456789" });
+  assert.equal(tooLong.status, "not-found");
+  for (const username of ["Example_\u0001user", "x".repeat(65)]) {
+    const invalidUsername = await new NowcoderAdapter({ client: { request: async () => { called = true; } } }).fetchSubmissions({ ...nowcoderRange, username });
+    assert.equal(invalidUsername.status, "not-found");
+  }
+  assert.equal(called, false);
+
+  const redirected = await new NowcoderAdapter({ client: { request: async () => ({ status: 200, finalUrl: "https://ac.nowcoder.com/", text: "<html></html>" }) } }).validateUser("123456789");
+  assert.equal(redirected.exists, false);
+  assert.equal(redirected.status, "not-found");
+
+  const wrongIdentity = textFixture("nowcoder-practice-coding.html").replace('window.curUser.id = "123456789"', 'window.curUser.id = "987654321"');
+  const mismatch = await new NowcoderAdapter({ client: { request: async (url) => ({ status: 200, finalUrl: url, text: wrongIdentity }) } }).validateUser("123456789");
+  assert.equal(mismatch.exists, null);
+  assert.equal(mismatch.status, "schema-changed");
+});
+
+test("NowCoder pagination stops complete at the requested date boundary", async () => {
+  const fixtureHtml = textFixture("nowcoder-practice-coding.html");
+  const client = nowcoderClient({ 1: fixtureHtml });
+  const from = Date.parse("2026-08-07T00:00:00+08:00");
+  const result = await new NowcoderAdapter({ client, limiter: { waitTurn: async () => {} } }).fetchSubmissions({ ...nowcoderRange, from });
+  assert.equal(result.status, "ok");
+  assert.equal(result.coverage.complete, true);
+  assert.equal(result.diagnostics.stopReason, "reached-from");
+  assert.deepEqual(result.submissions.map((item) => item.submissionId), ["102", "103"]);
+  assert.equal(client.calls.length, 1);
+  const query = new URL(client.calls[0]).searchParams;
+  assert.equal(query.get("pageSize"), "50");
+  assert.equal(query.get("statusTypeFilter"), "-1");
+  assert.equal(query.get("languageCategoryFilter"), "-1");
+  assert.equal(query.get("orderType"), "DESC");
+});
+
+test("NowCoder pagination reports repeated pages and cross-page overlap as partial", async () => {
+  const first = textFixture("nowcoder-practice-coding.html");
+  const repeatedClient = nowcoderClient({ 1: first, 2: first });
+  const repeated = await new NowcoderAdapter({ client: repeatedClient, limiter: { waitTurn: async () => {} } }).fetchSubmissions(nowcoderRange);
+  assert.equal(repeated.status, "partial");
+  assert.equal(repeated.coverage.reason, "repeated-page");
+
+  const overlappingSecond = first
+    .replaceAll("submissionId=103", "submissionId=100")
+    .replaceAll(">103<", ">100<")
+    .replaceAll("submissionId=102", "submissionId=99")
+    .replaceAll(">102<", ">99<")
+    .replaceAll("2026-08-07 11:20:30", "2026-08-05 11:20:30")
+    .replaceAll("2026-08-07 10:20:30", "2026-08-05 10:20:30")
+    .replaceAll("2026-08-06 09:20:30", "2026-08-05 09:20:30")
+    .replace(/<div class="pagination">[\s\S]*?<\/div>/, "");
+  const overlapClient = nowcoderClient({ 1: first, 2: overlappingSecond });
+  const overlap = await new NowcoderAdapter({ client: overlapClient, limiter: { waitTurn: async () => {} } }).fetchSubmissions(nowcoderRange);
+  assert.equal(overlap.status, "partial");
+  assert.equal(overlap.coverage.reason, "overlapping-page");
+});
+
+test("NowCoder rejects time disorder and marks an injected page cap partial", async () => {
+  const first = textFixture("nowcoder-practice-coding.html");
+  const disordered = first.replace("2026-08-07 10:20:30", "2026-08-08 10:20:30");
+  const disorderClient = nowcoderClient({ 1: disordered });
+  const disorder = await new NowcoderAdapter({ client: disorderClient, limiter: { waitTurn: async () => {} } }).fetchSubmissions(nowcoderRange);
+  assert.equal(disorder.status, "schema-changed");
+  assert.equal(disorder.coverage.complete, false);
+
+  const crossPageJump = first
+    .replaceAll("submissionId=103", "submissionId=203").replaceAll(">103<", ">203<")
+    .replaceAll("submissionId=102", "submissionId=202").replaceAll(">102<", ">202<")
+    .replaceAll("submissionId=101", "submissionId=201").replaceAll(">101<", ">201<")
+    .replaceAll("2026-08-07", "2026-08-08")
+    .replaceAll("2026-08-06", "2026-08-07");
+  const crossPageClient = nowcoderClient({ 1: first, 2: crossPageJump });
+  const crossPageDisorder = await new NowcoderAdapter({ client: crossPageClient, limiter: { waitTurn: async () => {} } }).fetchSubmissions(nowcoderRange);
+  assert.equal(crossPageDisorder.status, "schema-changed");
+  assert.match(crossPageDisorder.warning, /跨页/);
+
+  const cappedClient = nowcoderClient({ 1: first });
+  const capped = await new NowcoderAdapter({ client: cappedClient, limiter: { waitTurn: async () => {} }, maxPages: 1 }).fetchSubmissions(nowcoderRange);
+  assert.equal(capped.status, "partial");
+  assert.equal(capped.coverage.reason, "page-limit");
+});
+
+test("NowCoder confirms completion only after the declared last page", async () => {
+  const first = textFixture("nowcoder-practice-coding.html");
+  const last = first
+    .replaceAll("submissionId=103", "submissionId=203").replaceAll(">103<", ">203<")
+    .replaceAll("submissionId=102", "submissionId=202").replaceAll(">102<", ">202<")
+    .replaceAll("submissionId=101", "submissionId=201").replaceAll(">101<", ">201<")
+    .replaceAll("2026-08-07", "2026-08-05")
+    .replaceAll("2026-08-06", "2026-08-04");
+  const client = nowcoderClient({ 1: first, 2: last });
+  const result = await new NowcoderAdapter({ client, limiter: { waitTurn: async () => {} } }).fetchSubmissions(nowcoderRange);
+  assert.equal(result.status, "ok");
+  assert.equal(result.coverage.complete, true);
+  assert.equal(result.diagnostics.stopReason, "last-page");
+  assert.equal(client.calls.length, 2);
+});
+
+test("NowCoder resolved usernames keep full pagination and canonical record names", async () => {
+  const first = examplePracticeHtml();
+  const last = examplePracticeHtml()
+    .replaceAll("submissionId=103", "submissionId=203").replaceAll(">103<", ">203<")
+    .replaceAll("submissionId=102", "submissionId=202").replaceAll(">102<", ">202<")
+    .replaceAll("submissionId=101", "submissionId=201").replaceAll(">101<", ">201<")
+    .replaceAll("2026-08-07", "2026-08-05")
+    .replaceAll("2026-08-06", "2026-08-04");
+  const client = nowcoderIdentifierClient(textFixture("nowcoder-rating-search.html"), { 1: first, 2: last });
+  const result = await new NowcoderAdapter({ client, limiter: { waitTurn: async () => {} } }).fetchSubmissions({ ...nowcoderRange, username: "example_USER" });
+  assert.equal(result.status, "ok");
+  assert.equal(result.diagnostics.stopReason, "last-page");
+  assert.equal(result.diagnostics.resolvedUid, "900000000000000001");
+  assert.equal(client.calls.length, 3);
+  assert.ok(result.submissions.every((submission) => submission.username === "Example_user"));
+  assert.ok(client.calls.slice(1).every((url) => new URL(url).pathname === "/acm/contest/profile/900000000000000001/practice-coding"));
 });
 
 test("QOJ UOJ-derived fixture maps semantic columns, UTC+8 time and only full acceptance", () => {

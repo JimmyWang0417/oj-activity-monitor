@@ -24,7 +24,15 @@ const STATUS_LABELS = Object.freeze({
   "network-error": "网络错误"
 });
 
-const JUDGE_LABELS = Object.freeze({ codeforces: "Codeforces", atcoder: "AtCoder", vjudge: "VJudge", luogu: "洛谷", qoj: "QOJ" });
+const JUDGE_LABELS = Object.freeze({ codeforces: "Codeforces", atcoder: "AtCoder", vjudge: "VJudge", luogu: "洛谷", nowcoder: "牛客", qoj: "QOJ" });
+
+function accountUsernameChanged(account, nextUsername) {
+  return String(account?.username || "").trim() !== String(nextUsername || "").trim();
+}
+
+function accountIdentifierLabel(judge) {
+  return judge === "nowcoder" ? "牛客竞赛用户名或数字 UID" : `${JUDGE_LABELS[judge] || judge} 用户名`;
+}
 
 const CSS = `
 #oj-monitor-root, #oj-monitor-root * { box-sizing: border-box; }
@@ -318,12 +326,12 @@ class MonitorPanel {
     } else {
       const group = this.config.groups.find((item) => item.id === this.selectedGroup);
       const hasSource = (judge, scope) => group?.accounts.some((account) => account.enabled && account.judge === judge && (judge !== "codeforces" || account.scopes?.[scope] !== false));
-      table.append(element(this.document, "thead", {}, element(this.document, "tr", {}, ["日期", "CF Problemset", "CF Gym", "AtCoder", "VJudge", "洛谷", "QOJ", "合计", "状态"].map((text) => element(this.document, "th", { text })) )));
+      table.append(element(this.document, "thead", {}, element(this.document, "tr", {}, ["日期", "CF Problemset", "CF Gym", "AtCoder", "VJudge", "洛谷", "牛客", "QOJ", "合计", "状态"].map((text) => element(this.document, "th", { text })) )));
       const tbody = element(this.document, "tbody");
       for (const row of buildDailyRows(this.data.stats, this.selectedGroup, this.data.bounds.dateKeys)) {
         const sourceCells = [
           [row.problemset, hasSource("codeforces", "problemset")], [row.gym, hasSource("codeforces", "gym")],
-          [row.atcoder, hasSource("atcoder")], [row.vjudge, hasSource("vjudge")], [row.luogu, hasSource("luogu")], [row.qoj, hasSource("qoj")]
+          [row.atcoder, hasSource("atcoder")], [row.vjudge, hasSource("vjudge")], [row.luogu, hasSource("luogu")], [row.nowcoder, hasSource("nowcoder")], [row.qoj, hasSource("qoj")]
         ];
         tbody.append(element(this.document, "tr", { onclick: () => { this.detailDate = row.date; this.render(); } }, [
           element(this.document, "td", { text: row.date }), ...sourceCells.map(([cell, exists]) => element(this.document, "td", { text: exists ? cellText(cell) : "—" })), element(this.document, "td", { text: cellText(row.total) }),
@@ -481,7 +489,7 @@ class MonitorPanel {
   }
 
   renderAccountEditor(group, account) {
-    const username = element(this.document, "input", { class: "oj-monitor-input", value: account.username, "aria-label": `${JUDGE_LABELS[account.judge]} 用户名` });
+    const username = element(this.document, "input", { class: "oj-monitor-input", value: account.username, "aria-label": accountIdentifierLabel(account.judge) });
     const enabled = element(this.document, "input", { type: "checkbox", checked: account.enabled });
     const problemset = element(this.document, "input", { type: "checkbox", checked: account.scopes?.problemset !== false });
     const gym = element(this.document, "input", { type: "checkbox", checked: account.scopes?.gym !== false });
@@ -492,9 +500,11 @@ class MonitorPanel {
     if (account.judge === "codeforces") row.append(element(this.document, "label", {}, [problemset, " Problemset"]), element(this.document, "label", {}, [gym, " Gym"]));
     row.append(
       element(this.document, "button", { class: "oj-monitor-button", text: "保存", onclick: async () => {
-        const updated = { ...account, username: username.value.trim(), enabled: enabled.checked };
+        const nextUsername = username.value.trim();
+        const updated = { ...account, username: nextUsername, enabled: enabled.checked };
         if (account.judge === "codeforces") updated.scopes = { problemset: problemset.checked, gym: gym.checked };
         const groups = this.config.groups.map((item) => item.id === group.id ? { ...item, accounts: item.accounts.map((entry) => entry.id === account.id ? updated : entry), updatedAt: Date.now() } : item);
+        if (accountUsernameChanged(account, nextUsername)) await this.store.removeAccount(account.id);
         await this.saveConfig({ ...this.config, groups }); this.renderSettings();
       } }),
       element(this.document, "button", { class: "oj-monitor-button", text: "测试用户", onclick: async (event) => {
@@ -514,7 +524,7 @@ class MonitorPanel {
 
   renderAddAccount(group) {
     const judge = element(this.document, "select", { class: "oj-monitor-select" }, Object.entries(JUDGE_LABELS).map(([id, label]) => option(this.document, id, label)));
-    const username = element(this.document, "input", { class: "oj-monitor-input", placeholder: "用户名或 UID" });
+    const username = element(this.document, "input", { class: "oj-monitor-input", placeholder: "用户名；牛客可填竞赛用户名或数字 UID" });
     return element(this.document, "div", { class: "oj-monitor-account oj-monitor-row" }, [
       judge, username,
       element(this.document, "button", { class: "oj-monitor-button oj-monitor-button-primary", text: "添加网站账号", onclick: async () => {
@@ -541,4 +551,4 @@ class MonitorPanel {
   }
 }
 
-module.exports = { CSS, JUDGE_LABELS, MonitorPanel, STATUS_LABELS, cellText, displayCoverageStatus, element, sharedRefreshNotice, sourceIssueText, verdictText };
+module.exports = { CSS, JUDGE_LABELS, MonitorPanel, STATUS_LABELS, accountIdentifierLabel, accountUsernameChanged, cellText, displayCoverageStatus, element, sharedRefreshNotice, sourceIssueText, verdictText };

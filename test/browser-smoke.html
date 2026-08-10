@@ -18,16 +18,19 @@
     const groups = [
       { id: "g1", name: "张三", sortOrder: 0, accounts: [{ id: "a1", judge: "codeforces", username: "tourist", enabled: true, sortOrder: 0, scopes: { problemset: true, gym: true } }] },
       { id: "g2", name: "李四", sortOrder: 1, accounts: [{ id: "a2", judge: "atcoder", username: "chokudai", enabled: true, sortOrder: 0 }] },
-      { id: "g3", name: "王五", sortOrder: 2, accounts: [{ id: "a3", judge: "qoj", username: "alice", enabled: true, sortOrder: 0 }] }
+      { id: "g3", name: "王五", sortOrder: 2, accounts: [{ id: "a3", judge: "qoj", username: "alice", enabled: true, sortOrder: 0 }] },
+      { id: "g4", name: "赵六", sortOrder: 3, accounts: [{ id: "a4", judge: "nowcoder", username: "123456789", enabled: true, sortOrder: 0 }] }
     ];
+    const judges = ["codeforces", "atcoder", "qoj", "nowcoder"];
     const stats = [];
     for (const [groupIndex, group] of groups.entries()) for (const [index, date] of dateKeys.entries()) {
-      stats.push({ groupId: group.id, accountId: group.accounts[0].id, judge: groupIndex === 0 ? "codeforces" : groupIndex === 1 ? "atcoder" : "qoj", scope: groupIndex ? "default" : "problemset", date, submissionCount: (index * (groupIndex + 2)) % 11, solvedCount: (index + groupIndex) % 6, excludedCount: 0, status: index === 24 && groupIndex === 1 ? "partial" : "ok", coverageComplete: !(index === 24 && groupIndex === 1), updatedAt: now });
+      stats.push({ groupId: group.id, accountId: group.accounts[0].id, judge: judges[groupIndex], scope: groupIndex ? "default" : "problemset", date, submissionCount: (index * (groupIndex + 2)) % 11, solvedCount: (index + groupIndex) % 6, excludedCount: 0, status: index === 24 && groupIndex === 1 ? "partial" : "ok", coverageComplete: !(index === 24 && groupIndex === 1), updatedAt: now });
     }
     const chunks = [
       ["stats:g1:a1:codeforces:problemset:2026", stats.filter((item) => item.groupId === "g1")],
       ["stats:g2:a2:atcoder:default:2026", stats.filter((item) => item.groupId === "g2")],
-      ["stats:g3:a3:qoj:default:2026", stats.filter((item) => item.groupId === "g3")]
+      ["stats:g3:a3:qoj:default:2026", stats.filter((item) => item.groupId === "g3")],
+      ["stats:g4:a4:nowcoder:default:2026", stats.filter((item) => item.groupId === "g4")]
     ];
     const values = new Map([
       [prefix + "config", { schemaVersion: 1, groups, settings: { days: 30, timeZone: "local", metric: "solved", autoRefreshMinutes: 15, theme: "system" } }],

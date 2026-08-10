@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+<head><title>Alice &amp; Bob 的比赛主页</title></head>
+<body>
+  <a class="coder-name rate-score2" data-title="Alice &amp; Bob">Alice &amp; Bob</a>
+  <script>
+    window.curUser = {};
+    window.curUser.id = "123456789";
+  </script>
+  <div class="my-state-main">
+    <div class="my-state-item"><div class="state-num">3</div><span>题已挑战</span></div>
+    <div class="my-state-item"><div class="state-num">1</div><span>题已通过</span></div>
+    <div class="my-state-item"><div class="state-num">3</div><span>次提交</span></div>
+  </div>
+  <table class="table-hover">
+    <thead><tr>
+      <th>运行ID</th><th>题目</th><th>运行结果</th><th>得分</th><th>使用语言</th><th>提交时间</th>
+    </tr></thead>
+    <tbody>
+      <tr>
+        <td><a href="/acm/contest/view-submission?submissionId=103&amp;returnHomeType=1&amp;uid=123456789">103</a></td>
+        <td><a href="/acm/problem/200">A &amp; B</a></td>
+        <td><a class="font-green">答案正确</a></td><td>100</td><td>C++</td><td>2026-08-07 11:20:30</td>
+      </tr>
+      <tr>
+        <td><a href="/acm/contest/view-submission?submissionId=102&amp;returnHomeType=1&amp;uid=123456789">102</a></td>
+        <td><a href="/acm/problem/201">Wrong &lt;answer&gt;</a></td>
+        <td><a class="font-red">答案错误</a></td><td>80</td><td>Java</td><td>2026-08-07 10:20:30</td>
+      </tr>
+      <tr>
+        <td><a href="/acm/contest/view-submission?submissionId=101&amp;returnHomeType=1&amp;uid=123456789">101</a></td>
+        <td><a href="/acm/problem/202">Timeout</a></td>
+        <td><a>运行超时</a></td><td>20</td><td>Python</td><td>2026-08-06 09:20:30</td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="pagination"><ul data-total="2">
+    <li class="js-next-pager"><a data-page="2" href="?&amp;pageSize=50&amp;search=&amp;statusTypeFilter=-1&amp;languageCategoryFilter=-1&amp;orderType=DESC&amp;page=2">下一页</a></li>
+  </ul></div>
+</body>
+</html>

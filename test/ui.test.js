@@ -2,7 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { cellText, displayCoverageStatus, sharedRefreshNotice, sourceIssueText, verdictText } = require("../src/ui");
+const { JUDGE_LABELS, accountIdentifierLabel, accountUsernameChanged, cellText, displayCoverageStatus, sharedRefreshNotice, sourceIssueText, verdictText } = require("../src/ui");
 
 test("proved descending coverage renders exact counts and partial coverage renders lower bounds", () => {
   assert.equal(cellText({ solvedCount: 3, submissionCount: 8, coverageComplete: true }), "3/8");
@@ -38,4 +38,13 @@ test("shared refresh completion replaces the waiting message", () => {
     text: "已读取另一个标签页完成的共享结果；有 2 个来源未完整覆盖，请查看每日表格状态。",
     status: "partial"
   });
+});
+
+test("NowCoder uses the Chinese UI label and username changes alone require cache reset", () => {
+  assert.equal(JUDGE_LABELS.nowcoder, "牛客");
+  assert.equal(accountIdentifierLabel("nowcoder"), "牛客竞赛用户名或数字 UID");
+  const account = { username: "123456789", enabled: true };
+  assert.equal(accountUsernameChanged(account, " 123456789 "), false);
+  assert.equal(accountUsernameChanged(account, "987654321"), true);
+  assert.equal(accountUsernameChanged({ ...account, enabled: false }, "123456789"), false);
 });

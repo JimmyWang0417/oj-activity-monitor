@@ -100,6 +100,20 @@ test("QOJ is a first-class default-scope judge in config and submissions", () =>
   assert.equal(submission.scope, "default");
 });
 
+test("NowCoder is a first-class default-scope judge and recovers its exact legacy verdict", () => {
+  const { normalizeAccount, normalizeSubmission } = require("../src/core");
+  assert.deepEqual(normalizeAccount({ id: "n", judge: "nowcoder", username: "123456789" }), {
+    id: "n", judge: "nowcoder", username: "123456789", enabled: true, sortOrder: 0
+  });
+  const item = normalizeSubmission({
+    groupId: "g", accountId: "n", judge: "nowcoder", username: "123456789", submissionId: "1",
+    problemKey: "nowcoder:2", submittedAt: 1, verdict: "答案正确", accepted: false
+  });
+  assert.equal(item.scope, "default");
+  assert.equal(item.accepted, true);
+  assert.equal(inferAccepted("nowcoder", "答案错误", false), false);
+});
+
 test("legacy QOJ and Luogu cache entries recover accepted status from verdict text", () => {
   assert.equal(inferAccepted("qoj", "AC ✓", false), true);
   assert.equal(inferAccepted("qoj", "100.0", false), true);
