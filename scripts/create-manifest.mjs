@@ -5,7 +5,18 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const output = path.join(root, "dist", "SOURCE-MANIFEST.sha256");
-const roots = [".gitignore", "package.json", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "src", "scripts", "test", "dist/oj-monitor.user.js"];
+const roots = [
+  ".gitignore",
+  "package.json",
+  "README.md",
+  "LICENSE",
+  "THIRD_PARTY_NOTICES.md",
+  "src",
+  "scripts",
+  "test",
+  "dist/oj-monitor.meta.js",
+  "dist/oj-monitor.user.js"
+];
 
 function filesUnder(relative) {
   const absolute = path.join(root, relative);

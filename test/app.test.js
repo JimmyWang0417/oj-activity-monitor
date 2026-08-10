@@ -77,9 +77,10 @@ test("NowCoder metadata and release source contract stays present", () => {
   const mainSource = fs.readFileSync(path.join(root, "src", "main.js"), "utf8");
   const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 
-  assert.equal(packageJson.version, "0.2.14");
-  assert.match(mainSource, /version:\s*"0\.2\.14"/);
-  assert.match(metadata, /^\/\/ @version\s+0\.2\.14$/m);
+  assert.match(packageJson.version, /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/);
+  assert.match(mainSource, /const packageMetadata = require\("\.\.\/package\.json"\)/);
+  assert.match(mainSource, /version:\s*packageMetadata\.version/);
+  assert.match(metadata, /^\/\/ @version\s+\{\{VERSION\}\}$/m);
   assert.match(metadata, /^\/\/ @match\s+https:\/\/ac\.nowcoder\.com\/\*$/m);
   assert.match(metadata, /^\/\/ @connect\s+ac\.nowcoder\.com$/m);
   assert.doesNotMatch(metadata, /www\.nowcoder\.com/);

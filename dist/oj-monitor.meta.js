@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         OJ Monitor
 // @namespace    https://github.com/oj-monitor/userscript
-// @version      {{VERSION}}
+// @version      0.2.15
 // @description  在本地浏览器中按人监测多个 OJ 的近期提交与过题情况
 // @author       OJ Monitor contributors
 // @license      GPL-3.0-only
-// @homepageURL  {{HOMEPAGE_URL}}
-// @supportURL   {{SUPPORT_URL}}
-// @updateURL    {{UPDATE_URL}}
-// @downloadURL  {{DOWNLOAD_URL}}
+// @homepageURL  https://github.com/JimmyWang0417/oj-activity-monitor
+// @supportURL   https://github.com/JimmyWang0417/oj-activity-monitor/issues
+// @updateURL    https://raw.githubusercontent.com/JimmyWang0417/oj-activity-monitor/main/dist/oj-monitor.meta.js
+// @downloadURL  https://raw.githubusercontent.com/JimmyWang0417/oj-activity-monitor/main/dist/oj-monitor.user.js
 // @match        https://codeforces.com/*
 // @match        https://*.codeforces.com/*
 // @match        https://codeforc.es/*

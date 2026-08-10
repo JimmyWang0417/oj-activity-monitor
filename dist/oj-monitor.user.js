@@ -1,10 +1,14 @@
 // ==UserScript==
 // @name         OJ Monitor
 // @namespace    https://github.com/oj-monitor/userscript
-// @version      0.2.14
+// @version      0.2.15
 // @description  在本地浏览器中按人监测多个 OJ 的近期提交与过题情况
 // @author       OJ Monitor contributors
 // @license      GPL-3.0-only
+// @homepageURL  https://github.com/JimmyWang0417/oj-activity-monitor
+// @supportURL   https://github.com/JimmyWang0417/oj-activity-monitor/issues
+// @updateURL    https://raw.githubusercontent.com/JimmyWang0417/oj-activity-monitor/main/dist/oj-monitor.meta.js
+// @downloadURL  https://raw.githubusercontent.com/JimmyWang0417/oj-activity-monitor/main/dist/oj-monitor.user.js
 // @match        https://codeforces.com/*
 // @match        https://*.codeforces.com/*
 // @match        https://codeforc.es/*
@@ -46,6 +50,7 @@
 "src/main.js": function(module, exports, __require) {
 "use strict";
 
+const packageMetadata = __require("package.json");
 const core = __require("src/core.js");
 const adapters = __require("src/adapters/index.js");
 const app = __require("src/app.js");
@@ -58,7 +63,7 @@ const ui = __require("src/ui.js");
 const viewModel = __require("src/view-model.js");
 
 const api = Object.freeze({
-    version: "0.2.14",
+  version: packageMetadata.version,
   ...adapters,
   ...app,
   ...core,
@@ -87,6 +92,9 @@ if (typeof document !== "undefined" && !globalThis.__OJMON_TEST__) {
 
 module.exports = api;
 
+},
+"package.json": function(module, exports, __require) {
+module.exports = {"name":"oj-activity-monitor","version":"0.2.15","private":true,"description":"Local-first multi-user Online Judge activity monitor for Tampermonkey","license":"GPL-3.0-only","scripts":{"build":"node scripts/build.mjs","test":"node --test test/*.test.js","manifest":"node scripts/create-manifest.mjs","check":"npm run build && npm test && node scripts/verify-release.mjs && node scripts/verify-reproducible-build.mjs && npm run manifest"},"engines":{"node":">=20"}};
 },
 "src/core.js": function(module, exports, __require) {
 "use strict";

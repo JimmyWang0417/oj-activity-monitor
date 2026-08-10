@@ -15,12 +15,20 @@ OJ Activity Monitor（仓库名：`oj-activity-monitor`）是一个本地优先�
 ## 安装
 
 1. 在浏览器安装 Tampermonkey 或兼容的 userscript 管理器。
-2. 打开 [`dist/oj-monitor.user.js`](dist/oj-monitor.user.js) 的原始内容并安装。
+2. 打开 [OJ Monitor 安装链接](https://raw.githubusercontent.com/JimmyWang0417/oj-activity-monitor/main/dist/oj-monitor.user.js)，由 userscript 管理器确认安装。
 3. 进入 Codeforces、AtCoder、VJudge、洛谷、牛客竞赛或 QOJ 任一受支持页面。
 4. 点击右上角“`OJ 监测`”，或从油猴菜单选择“打开 OJ 监测面板”。
 5. 创建以被监测者姓名命名的分组，再添加网站用户名或 UID。牛客可填写竞赛用户名或个人主页 URL 中的数字 UID；若公开 Rating 搜索无法唯一解析用户名，请改填 UID。Codeforces 可分别启用 Problemset 和 Gym。
 
 脚本不需要被监测者登录。牛客的公开“TA 的练习 / 编程题”列表无需登录，脚本不会打开需要登录的提交源码详情。洛谷提交记录要求脚本安装者在当前浏览器中登录，并且本地账号有权查看对应记录；QOJ 提交列表和用户页也要求脚本安装者先登录 QOJ。洛谷会话代理只在规范站点 `https://www.luogu.com.cn/` 注册；裸域 `https://luogu.com.cn/` 会跨源跳转到 `www`，不能作为已登录会话标签页。
+
+## 自动更新
+
+- v0.2.15 起，已安装脚本通过 `@updateURL` 检查轻量的 [`dist/oj-monitor.meta.js`](dist/oj-monitor.meta.js)。当其中的 `@version` 更高时，userscript 管理器再从 `@downloadURL` 下载完整的 [`dist/oj-monitor.user.js`](dist/oj-monitor.user.js)。脚本自身不会下载并执行远程代码。
+- Tampermonkey 必须允许该脚本检查更新；检查周期由扩展设置决定。需要立即检查时，可在 Tampermonkey 管理面板中对该脚本执行“检查更新”。GitHub raw 文件可能有短暂缓存，因此刚推送后不一定立即可见。
+- 从 v0.2.14 或更早版本升级时，建议先手动打开一次上面的安装链接。安装页仍显示同一个 `@name` 与 `@namespace`，会更新原脚本并保留其本地配置和统计数据；此后版本才具备仓库声明的固定自动更新地址。
+- 自动更新只跟随 GitHub `main` 中已经提交的发布产物。若仓库里的 metadata、完整 bundle 或版本号不一致，发布校验会失败，不能形成有效候选。
+- 自动化校验覆盖更新契约和发布产物一致性，不等同于所有 Firefox/Tampermonkey 版本的真实端到端更新测试。若自动检查没有触发，请先确认扩展允许检查更新，再使用安装链接手动覆盖更新。
 
 ### 牛客账号配置与排错
 
@@ -83,7 +91,14 @@ npm run build
 npm run check
 ```
 
-构建脚本会把 `src/` 中的 CommonJS 模块打成单个 [`dist/oj-monitor.user.js`](dist/oj-monitor.user.js)，并校验 userscript metadata、授权域名以及是否残留本地 `require()`。
+`package.json` 是发布版本的唯一来源。构建脚本会把版本写入 metadata，将 `src/` 中的 CommonJS 模块打成单个 [`dist/oj-monitor.user.js`](dist/oj-monitor.user.js)，并同时生成只含同一 metadata block 的 [`dist/oj-monitor.meta.js`](dist/oj-monitor.meta.js)。校验会检查两个产物的身份、版本、自动更新 URL、授权域名、运行时 API 版本以及是否残留本地 `require()`。
+
+发布新版本时：
+
+1. 只提升 `package.json` 的 `version`，不要手工编辑构建产物中的版本。
+2. 运行 `npm run check`，确认完整测试、release verifier 和 `SOURCE-MANIFEST.sha256` 均通过。
+3. 检查并在同一个提交中纳入源码、`package.json`、`dist/oj-monitor.meta.js`、`dist/oj-monitor.user.js`、`dist/SOURCE-MANIFEST.sha256` 与 `dist/CANDIDATE.sha256`。
+4. 将该提交推送到 GitHub `main`；轻量 metadata 和完整脚本必须一起发布，避免客户端先看到新版本却下载到旧 bundle。
 
 测试包含 URL/命名空间、判题映射、时区聚合、存储校验、租约/限速、六个平台 fixture、分页完整性/截断、刷新隔离和视图模型。`test/browser-smoke.html` 可在本地浏览器中加载构建产物，使用模拟 GM 存储检查完整面板布局。
 

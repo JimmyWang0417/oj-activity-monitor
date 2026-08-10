@@ -1,5 +1,6 @@
 "use strict";
 
+const packageMetadata = require("../package.json");
 const core = require("./core");
 const adapters = require("./adapters");
 const app = require("./app");
@@ -12,7 +13,7 @@ const ui = require("./ui");
 const viewModel = require("./view-model");
 
 const api = Object.freeze({
-    version: "0.2.14",
+  version: packageMetadata.version,
   ...adapters,
   ...app,
   ...core,

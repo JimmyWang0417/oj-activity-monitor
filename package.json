@@ -1,6 +1,6 @@
 {
   "name": "oj-activity-monitor",
-  "version": "0.2.14",
+  "version": "0.2.15",
   "private": true,
   "description": "Local-first multi-user Online Judge activity monitor for Tampermonkey",
   "license": "GPL-3.0-only",
@@ -8,7 +8,7 @@
     "build": "node scripts/build.mjs",
     "test": "node --test test/*.test.js",
     "manifest": "node scripts/create-manifest.mjs",
-    "check": "npm run build && npm test && node scripts/verify-release.mjs && npm run manifest"
+    "check": "npm run build && npm test && node scripts/verify-release.mjs && node scripts/verify-reproducible-build.mjs && npm run manifest"
   },
   "engines": {
     "node": ">=20"

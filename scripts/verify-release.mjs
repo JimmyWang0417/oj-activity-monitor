@@ -2,10 +2,18 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import {
+  RELEASE_URLS,
+  verifyReleaseArtifacts
+} from "./release-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const releasePath = path.join(root, "dist", "oj-monitor.user.js");
+const metadataPath = path.join(root, "dist", "oj-monitor.meta.js");
 const source = fs.readFileSync(releasePath, "utf8");
+const metadataSource = fs.readFileSync(metadataPath, "utf8");
+const packageSource = fs.readFileSync(path.join(root, "package.json"), "utf8");
+const { version } = verifyReleaseArtifacts({ packageSource, metadataSource, userscriptSource: source });
 const required = [
   "// ==UserScript==",
   "// ==/UserScript==",
@@ -14,12 +22,13 @@ const required = [
   "// @grant        unsafeWindow",
   "// @grant        GM_getValue",
   "// @grant        GM_setValue",
+  `// @updateURL    ${RELEASE_URLS.update}`,
+  `// @downloadURL  ${RELEASE_URLS.download}`,
   "// @connect      kenkoooo.com",
   "// @match        https://ac.nowcoder.com/*",
   "// @connect      ac.nowcoder.com",
   "// @match        https://qoj.ac/*",
   "// @connect      qoj.ac",
-  "version: \"0.2.14\"",
   "class NowcoderAdapter",
   "function parseNowcoderRatingHtml",
   "x-luogu-type",
@@ -48,4 +57,7 @@ for (const document of ["README.md", "THIRD_PARTY_NOTICES.md"]) {
     process.exit(1);
   }
 }
-console.log(`Verified dist/oj-monitor.user.js (${Buffer.byteLength(source)} bytes)`);
+console.log(
+  `Verified dist/oj-monitor.user.js (${Buffer.byteLength(source)} bytes) and `
+  + `dist/oj-monitor.meta.js (${Buffer.byteLength(metadataSource)} bytes) at v${version}`
+);
