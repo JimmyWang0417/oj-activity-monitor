@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OJ Monitor
 // @namespace    https://github.com/oj-monitor/userscript
-// @version      0.2.15
+// @version      0.2.16
 // @description  在本地浏览器中按人监测多个 OJ 的近期提交与过题情况
 // @author       OJ Monitor contributors
 // @license      GPL-3.0-only
@@ -94,7 +94,7 @@ module.exports = api;
 
 },
 "package.json": function(module, exports, __require) {
-module.exports = {"name":"oj-activity-monitor","version":"0.2.15","private":true,"description":"Local-first multi-user Online Judge activity monitor for Tampermonkey","license":"GPL-3.0-only","scripts":{"build":"node scripts/build.mjs","test":"node --test test/*.test.js","manifest":"node scripts/create-manifest.mjs","check":"npm run build && npm test && node scripts/verify-release.mjs && node scripts/verify-reproducible-build.mjs && npm run manifest"},"engines":{"node":">=20"}};
+module.exports = {"name":"oj-activity-monitor","version":"0.2.16","private":true,"description":"Local-first multi-user Online Judge activity monitor for Tampermonkey","license":"GPL-3.0-only","scripts":{"build":"node scripts/build.mjs","test":"node --test test/*.test.js","manifest":"node scripts/create-manifest.mjs","check":"npm run build && npm test && node scripts/verify-release.mjs && node scripts/verify-reproducible-build.mjs && npm run manifest"},"engines":{"node":">=20"}};
 },
 "src/core.js": function(module, exports, __require) {
 "use strict";

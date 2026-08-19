@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OJ Monitor
 // @namespace    https://github.com/oj-monitor/userscript
-// @version      0.2.15
+// @version      0.2.16
 // @description  在本地浏览器中按人监测多个 OJ 的近期提交与过题情况
 // @author       OJ Monitor contributors
 // @license      GPL-3.0-only
