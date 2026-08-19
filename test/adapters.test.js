@@ -156,7 +156,9 @@ test("VJudge falls back to exhaustive result slices when base reaches 200", asyn
       : { records: [], complete: true, totalFetched: 0 };
   };
   const result = await adapter.fetchSubmissions(range);
-  assert.equal(result.status, "ok");
+  assert.equal(result.status, "partial");
+  assert.equal(result.coverage.complete, false);
+  assert.equal(result.coverage.reason, "result-slices-not-provably-exhaustive");
   assert.equal(result.diagnostics.stopReason, "exhaustive-result-slices");
   assert.equal(calls, RESULT_FILTERS.length + 1);
 });
@@ -180,7 +182,7 @@ test("VJudge follows run-id pagination even when submission times are not ordere
 test("VJudge does not use time lower bounds to stop a saturated window", async () => {
   const adapter = new VJudgeAdapter({ client: {}, limiter: null });
   const page = (start) => Array.from({ length: 100 }, (_unused, index) => ({
-    runId: start + index + 1, oj: "CodeForces", probNum: "1A", time: index === 0 ? 1 : 1000000 - index,
+    runId: 200 - start - index, oj: "CodeForces", probNum: "1A", time: index === 0 ? 1 : 1000000 - index,
     statusType: 0, processing: false, status: "Accepted"
   }));
   const starts = [];
@@ -188,6 +190,28 @@ test("VJudge does not use time lower bounds to stop a saturated window", async (
   const result = await adapter.fetchSubmissions({ ...range, from: 500000 });
   assert.equal(result.status, "partial");
   assert.deepEqual(starts, [0, 100, ...Array.from({ length: RESULT_FILTERS.length }, (_unused, index) => [0, 100]).flat()]);
+});
+
+test("VJudge fails closed when runId order is not strictly descending", async () => {
+  const adapter = new VJudgeAdapter({ client: {}, limiter: null });
+  adapter.fetchPage = async () => [
+    { runId: 2, oj: "CodeForces", probNum: "1A", time: 2, statusType: 0, processing: false, status: "Accepted" },
+    { runId: 3, oj: "CodeForces", probNum: "1A", time: 1, statusType: 0, processing: false, status: "Accepted" }
+  ];
+  const result = await adapter.fetchSubmissions(range);
+  assert.equal(result.status, "schema-changed");
+  assert.equal(result.coverage.complete, false);
+  assert.equal(result.diagnostics.stopReason, "request-error");
+});
+
+test("VJudge fails closed when pages overlap", async () => {
+  const adapter = new VJudgeAdapter({ client: {}, limiter: null });
+  adapter.fetchPage = async (_options, start) => start === 0
+    ? Array.from({ length: 100 }, (_unused, index) => ({ runId: 200 - index, oj: "CodeForces", probNum: "1A", time: index, statusType: 0, processing: false, status: "Accepted" }))
+    : [{ runId: 200, oj: "CodeForces", probNum: "1A", time: 1, statusType: 0, processing: false, status: "Accepted" }];
+  const result = await adapter.fetchSubmissions(range);
+  assert.equal(result.status, "schema-changed");
+  assert.equal(result.coverage.complete, false);
 });
 
 test("VJudge keeps valid records when an individual response row is malformed", async () => {

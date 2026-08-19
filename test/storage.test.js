@@ -85,9 +85,16 @@ test("latest valid submission replaces an older-month copy with the same ID", as
 test("corrupt submission chunk does not block a newer valid response", async () => {
   const backend = new MemoryBackend();
   const store = new Store(backend);
-  await backend.set("oj-monitor:v1:submission-index", JSON.stringify({ schemaVersion: 1, checksum: "bad", payload: "[]" }));
+  const readable = { ...item("readable", "07"), judge: "vjudge" };
+  const readableName = store.monthChunkName(readable);
+  const corruptName = "submissions:other:vjudge:default:2026-07";
+  await backend.set(store.key("submission-index"), encodeEnvelope([readableName, corruptName]));
+  await backend.set(store.key(readableName), encodeEnvelope([readable]));
+  const corruptEnvelope = encodeEnvelope([{ ...item("lost", "07"), judge: "vjudge" }]);
+  await backend.set(store.key(corruptName), corruptEnvelope.replace(/"checksum":"[^"]+"/, '"checksum":"corrupt"'));
   await store.mergeSubmissions([{ ...item("fresh"), judge: "vjudge" }]);
-  assert.deepEqual((await store.loadSubmissions()).map((entry) => entry.submissionId), ["fresh"]);
+  assert.deepEqual((await store.loadSubmissions()).map((entry) => entry.submissionId), ["readable", "fresh"]);
+  assert.equal(await backend.get(store.key(corruptName)), undefined);
 });
 
 test("malformed cached records are ignored while newer valid records remain readable", async () => {

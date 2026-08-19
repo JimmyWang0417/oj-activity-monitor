@@ -15,6 +15,25 @@ const RESULT_FILTERS = Object.freeze([
   "JUDGE_FAILED", "SUBMIT_FAILED_PERM", "SUBMIT_FAILED_TEMP", "PENDING"
 ]);
 
+function validateRunIdPage(page, resultFilter, start, seenRunIds, previousLastRunId) {
+  let lastRunId = previousLastRunId;
+  for (let index = 0; index < page.length; index += 1) {
+    const runId = Number(page[index]?.runId);
+    if (!Number.isSafeInteger(runId) || runId < 0) {
+      throw new OJMonitorError("schema-changed", `VJudge ${resultFilter} 页 ${start} 的 runId 无效`);
+    }
+    if (seenRunIds.has(runId)) {
+      throw new OJMonitorError("schema-changed", `VJudge ${resultFilter} 分页出现重复 runId`);
+    }
+    if (lastRunId !== undefined && runId >= lastRunId) {
+      throw new OJMonitorError("schema-changed", `VJudge ${resultFilter} 分页的 runId 不是严格递减`);
+    }
+    seenRunIds.add(runId);
+    lastRunId = runId;
+  }
+  return lastRunId;
+}
+
 function normalizeVJudgeSubmission(record, options) {
   const runId = requireText(record?.runId, "VJudge runId");
   const origin = requireText(record?.oj, "VJudge oj");
@@ -75,8 +94,11 @@ class VJudgeAdapter {
 
   async fetchSlice(options, resultFilter = "all") {
     const records = [];
+    const seenRunIds = new Set();
+    let previousLastRunId;
     for (const start of [0, 100]) {
       const page = await this.fetchPage(options, start, resultFilter);
+      previousLastRunId = validateRunIdPage(page, resultFilter, start, seenRunIds, previousLastRunId);
       records.push(...page);
       if (page.length < 100) break;
     }
@@ -85,7 +107,7 @@ class VJudgeAdapter {
       return !Number.isFinite(time) || time >= options.from && time <= options.to;
     });
     const complete = records.length < 200;
-    return { records: relevant, complete, totalFetched: records.length };
+    return { records: relevant, complete, totalFetched: records.length, diagnostics: { resultFilter, seenRunIds: seenRunIds.size } };
   }
 
   async fetchSubmissions(options) {
@@ -111,14 +133,15 @@ class VJudgeAdapter {
       if (invalidRecords) complete = false;
       if (!base.complete) {
         sliced = true;
-        complete = true;
+        // The endpoint reports a sentinel total and does not expose a reliable
+        // proof that the fixed result-filter list is exhaustive. Keep the
+        // records as a useful lower bound, but never claim complete coverage.
+        complete = false;
         for (const filter of RESULT_FILTERS) {
           const slice = await this.fetchSlice(options, filter);
           consume(slice.records);
-          if (!slice.complete || invalidRecords) {
-            complete = false;
-            if (!slice.complete) truncatedFilters.push(filter);
-          }
+          if (!slice.complete) truncatedFilters.push(filter);
+          if (invalidRecords) complete = false;
         }
       }
       return makeResult(options, {
@@ -127,9 +150,9 @@ class VJudgeAdapter {
         status: complete ? "ok" : "partial",
         complete,
         submissions: [...byId.values()],
-        reason: complete ? undefined : invalidRecords ? "invalid-records" : "single-filter-window-limit",
-        warning: complete ? undefined : invalidRecords ? `VJudge 忽略 ${invalidRecords} 条无法解析的提交记录，数据可能不完整` : "VJudge 仅取得部分记录（单查询窗口上限 200）",
-        diagnostics: { stopReason: complete ? (sliced ? "exhaustive-result-slices" : "base-window-covered") : invalidRecords ? "invalid-records" : "slice-truncated", sliced, truncatedFilters, invalidRecords }
+        reason: complete ? undefined : invalidRecords ? "invalid-records" : sliced ? "result-slices-not-provably-exhaustive" : "single-filter-window-limit",
+        warning: complete ? undefined : invalidRecords ? `VJudge 忽略 ${invalidRecords} 条无法解析的提交记录，数据可能不完整` : sliced ? "VJudge 结果切片已读取，但接口未提供可验证的穷尽证明" : "VJudge 仅取得部分记录（单查询窗口上限 200）",
+        diagnostics: { stopReason: complete ? (sliced ? "exhaustive-result-slices" : "base-window-covered") : invalidRecords ? "invalid-records" : sliced ? "exhaustive-result-slices" : "slice-truncated", sliced, truncatedFilters, invalidRecords }
       });
     } catch (error) {
       return failureResult(options, "vjudge", "default", error, {
@@ -140,4 +163,4 @@ class VJudgeAdapter {
   }
 }
 
-module.exports = { RESULT_FILTERS, VJudgeAdapter, normalizeVJudgeSubmission };
+module.exports = { RESULT_FILTERS, VJudgeAdapter, normalizeVJudgeSubmission, validateRunIdPage };

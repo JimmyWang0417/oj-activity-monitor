@@ -57,7 +57,7 @@ OJ Activity Monitor（仓库名：`oj-activity-monitor`）是一个本地优先�
 | --- | --- | --- |
 | Codeforces | 官方 `user.status`、`contest.list`；同源 HTML 仅作 Gym 补充 | 使用两份 contest 集合分类，禁止按 ID 位数猜 Gym；`verdict === "OK"` 才算通过 |
 | AtCoder | AtCoderProblems API v3 | 官方用户页独立验证账号；每次 API 请求至少间隔 1 秒；`AC` 才算通过 |
-| VJudge | `/status/data` | 基础窗口最多 200 条，必要时按穷尽结果枚举切片；仍饱和则显示 `partial` |
+| VJudge | `/status/data` | 按 `runId` 校验页内/跨页严格递减；基础窗口最多 200 条，饱和后按已知结果切片扩展但仍显示 `partial` |
 | 洛谷 | 用户搜索 API、旧式 `DataResponse` 记录页 | 固定请求规范域 `www.luogu.com.cn`；记录请求同时使用 `_contentOnly=1` 与 `x-luogu-type: content-only`，登录门禁时自动交给已打开的 `www` 洛谷标签页并在页面主世界以第一方 Cookie 执行；HTML 中存在 `script#lentille-context` 时仍作兼容回退，但不把普通 HTML 误报成退出登录；按时间倒序持续分页到窗口起点/末页且不设默认页数上限；数值 `12`、文本 `AC`/`Accepted` 算通过 |
 | 牛客 | 公开 Rating 搜索及 `/acm/contest/profile/{uid}/practice-coding` HTML | 支持竞赛用户名或数字 UID；用户名仅在 Rating 搜索返回大小写折叠后名称精确匹配且唯一 UID 时解析，数字 UID 不增加搜索请求；仅统计“TA 的练习 / 编程题”表格；固定每页 50 条并按时间倒序抓取到窗口起点/末页，不设默认页数上限；只有“答案正确”算通过；页面时间不含 offset，当前按 UTC+8 解释 |
 | QOJ | 登录后 `/submissions?submitter=&page=` HTML | Cloudflare 拦截后台请求时自动交给已打开且通过验证的 QOJ 标签页；支持官方连字符团队账号；按时间边界分页且不设默认页数上限；从 `.uoj-username`/用户主页链接读取语义提交者，忽略独立的辅助 `#` 后仍做严格等值校验；能证明筛选身份的空结果页精确记为 0；`AC`/`Accepted`（含站点的勾号）或分数恰为 100 才算通过 |
@@ -106,7 +106,7 @@ npm run check
 ## 已知限制
 
 - AtCoder 提交依赖第三方 AtCoderProblems；数据源不可用时不会遍历全站比赛页降级。
-- VJudge 的 `/status/data` 按 `runId` 窗口分页，提交时间可能乱序；基础查询和结果切片各最多读取 200 条，极高频用户即使切片仍可能只得到下界。无法解析的本地缓存分块会被跳过，下一次合法响应按 submission ID 覆盖旧记录。
+- VJudge 的 `/status/data` 按 `runId` 窗口分页，提交时间可能乱序；适配器会校验每页及相邻页的 `runId` 严格递减并拒绝重复页。基础查询和结果切片各最多读取 200 条；基础窗口饱和后即使固定结果切片均未饱和，接口也没有可靠的穷尽证明，因此仍只显示已知下界并保持 `partial`。无法解析的本地缓存索引、分块或单条记录会被跳过，下一次合法响应按 `(accountId, judge, scope, submissionId)` 覆盖旧记录并清理旧月份副本。
 - Codeforces 私有/受限 Gym 能否补充取决于本地账号权限和浏览器同源会话；页面补充被明确标成降级数据。
 - 洛谷数据可见性由本地登录状态、被监测者设置和站点权限共同决定。
 - 牛客仅覆盖公开个人页的“TA 的练习 / 编程题”HTML，不保证包含比赛榜单、笔面试或其他产品线的提交；竞赛用户名通过公开 Rating 搜索解析，未进入该索引、重名或无法唯一匹配的账号必须改填数字 UID。Rating 与练习页 HTML 都没有版本化接口承诺，页面时间也不携带时区 offset，当前实现明确假设为 UTC+8。身份、表头、空态或分页证据不足时会失败关闭，不把未知页面记为零。
