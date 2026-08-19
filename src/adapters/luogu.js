@@ -7,6 +7,7 @@ const {
   makeResult,
   requireArray,
   requireFinite,
+  normalizeResumeBoundary,
   requireText,
   validationFailure
 } = require("./common");
@@ -313,6 +314,10 @@ class LuoguAdapter {
     let transportUsed;
     let attemptedTransports;
     let transportAttempts;
+    const resumeBoundary = normalizeResumeBoundary(options.resumeBoundary);
+    let resumeBoundaryCandidate;
+    let boundaryMatched = false;
+    let boundaryValid = Boolean(resumeBoundary);
     try {
       const user = await this.resolveUser(options.username, options.signal);
       for (let page = 1; ; page += 1) {
@@ -365,7 +370,8 @@ class LuoguAdapter {
         let oldest = Infinity;
         let newest = -Infinity;
         let previousInPage = Infinity;
-        for (const record of records) {
+        let boundaryIndex = -1;
+        for (const [recordIndex, record] of records.entries()) {
           const normalized = normalizeLuoguSubmission(record, options);
           if (normalized.submittedAt > previousInPage) {
             throw new OJMonitorError("schema-changed", "洛谷记录不再按提交时间倒序排列，不能证明分页完整");
@@ -373,12 +379,29 @@ class LuoguAdapter {
           previousInPage = normalized.submittedAt;
           oldest = Math.min(oldest, normalized.submittedAt);
           newest = Math.max(newest, normalized.submittedAt);
+          if (boundaryValid && normalized.submissionId === resumeBoundary.submissionId) {
+            if (normalized.submittedAt !== resumeBoundary.submittedAt) {
+              boundaryValid = false;
+              boundaryMatched = false;
+            } else {
+              boundaryIndex = recordIndex;
+            }
+          }
           if (normalized.submittedAt >= options.from && normalized.submittedAt <= options.to) submissions.push(normalized);
         }
         if (newest > previousOldest) {
           throw new OJMonitorError("schema-changed", "洛谷跨页记录顺序异常，不能证明分页完整");
         }
         previousOldest = oldest;
+        resumeBoundaryCandidate = {
+          submissionId: String(records.at(-1)?.id ?? records.at(-1)?.rid),
+          submittedAt: previousOldest
+        };
+        if (boundaryIndex >= 0) boundaryMatched = true;
+        if (boundaryValid && boundaryMatched && oldest < resumeBoundary.submittedAt) {
+          stopReason = "reached-known-boundary";
+          break;
+        }
         if (oldest < options.from) {
           stopReason = "reached-from";
           break;
@@ -419,7 +442,8 @@ class LuoguAdapter {
           transportAttempts,
           pagesFetched,
           pageSize,
-          totalCount
+          totalCount,
+          ...(resumeBoundaryCandidate ? { resumeBoundary: resumeBoundaryCandidate } : {})
         }
       });
     } catch (error) {
@@ -435,7 +459,8 @@ class LuoguAdapter {
           transportAttempts: transportAttempts || error.details?.transportAttempts,
           pagesFetched,
           pageSize,
-          totalCount
+          totalCount,
+          ...(resumeBoundaryCandidate ? { resumeBoundary: resumeBoundaryCandidate } : {})
         }
       });
     }

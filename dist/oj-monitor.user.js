@@ -674,6 +674,28 @@ function validationFailure(error) {
   return { exists: null, status: errorStatus(error), message: errorMessage(error) };
 }
 
+function normalizeResumeBoundary(value) {
+  if (!value || value.submissionId === undefined || value.submittedAt === undefined) return null;
+  const submittedAt = Number(value.submittedAt);
+  const submissionId = String(value.submissionId).trim();
+  if (!submissionId || !Number.isFinite(submittedAt)) return null;
+  return { submissionId, submittedAt };
+}
+
+function newestResumeBoundary(submissions) {
+  let newest;
+  for (const submission of submissions || []) {
+    const candidate = normalizeResumeBoundary(submission);
+    if (!candidate) continue;
+    if (!newest || candidate.submittedAt > newest.submittedAt ||
+      candidate.submittedAt === newest.submittedAt && candidate.submissionId > newest.submissionId) {
+      newest = candidate;
+    }
+  }
+  return newest;
+}
+
+
 function requireArray(value, label) {
   if (!Array.isArray(value)) throw new OJMonitorError("schema-changed", `${label} 不是数组`);
   return value;
@@ -700,6 +722,8 @@ module.exports = {
   requireArray,
   requireFinite,
   requireText,
+  normalizeResumeBoundary,
+  newestResumeBoundary,
   validationFailure
 };
 
@@ -716,6 +740,7 @@ const {
 const {
   failureResult,
   makeResult,
+  normalizeResumeBoundary,
   requireArray,
   requireFinite,
   requireText,
@@ -885,6 +910,11 @@ class CodeforcesAdapter {
     const records = [];
     let fromIndex = 1;
     let stopReason = "empty-page";
+    const resumeBoundaries = options.resumeBoundaries || {};
+    const boundarySeen = new Set();
+    const invalidBoundaries = new Set();
+    let boundaryTime = Infinity;
+    let previousOldest = Infinity;
     for (let page = 0; page < this.maxPages; page += 1) {
       const result = requireArray(await this.api("user.status", {
         handle: options.username,
@@ -892,13 +922,37 @@ class CodeforcesAdapter {
         count: String(this.pageSize)
       }, options.signal), "Codeforces user.status result");
       if (!result.length) break;
+      let previous = Infinity;
+      let newest = -Infinity;
       for (const record of result) {
         requireFinite(record?.creationTimeSeconds, "Codeforces creationTimeSeconds");
         records.push(record);
+        const submittedAt = Number(record.creationTimeSeconds) * 1000;
+        if (submittedAt > previous) throw new OJMonitorError("schema-changed", "Codeforces 提交不再按时间倒序排列");
+        previous = submittedAt;
+        newest = Math.max(newest, submittedAt);
+        const id = String(record.id);
+        for (const scope of ["problemset", "gym"]) {
+          const boundary = normalizeResumeBoundary(resumeBoundaries[scope]);
+          if (boundary && id === boundary.submissionId) {
+            if (submittedAt !== boundary.submittedAt) invalidBoundaries.add(scope);
+            else {
+              boundarySeen.add(scope);
+              boundaryTime = Math.min(boundaryTime, boundary.submittedAt);
+            }
+          }
+        }
       }
       const oldest = Math.min(...result.map((record) => Number(record.creationTimeSeconds) * 1000));
+      if (newest > previousOldest) throw new OJMonitorError("schema-changed", "Codeforces 跨页提交时间回跳，不能安全剪枝");
+      previousOldest = oldest;
       if (oldest < options.from) {
         stopReason = "reached-from";
+        break;
+      }
+      if (Object.keys(resumeBoundaries).length > 0 && invalidBoundaries.size === 0 &&
+        Object.keys(resumeBoundaries).every((scope) => boundarySeen.has(scope)) && oldest < boundaryTime) {
+        stopReason = "reached-known-boundary";
         break;
       }
       if (result.length < this.pageSize) {
@@ -1025,6 +1079,7 @@ const {
   makeResult,
   requireArray,
   requireFinite,
+  normalizeResumeBoundary,
   requireText,
   validationFailure
 } = __require("src/adapters/common.js");
@@ -1331,6 +1386,10 @@ class LuoguAdapter {
     let transportUsed;
     let attemptedTransports;
     let transportAttempts;
+    const resumeBoundary = normalizeResumeBoundary(options.resumeBoundary);
+    let resumeBoundaryCandidate;
+    let boundaryMatched = false;
+    let boundaryValid = Boolean(resumeBoundary);
     try {
       const user = await this.resolveUser(options.username, options.signal);
       for (let page = 1; ; page += 1) {
@@ -1383,7 +1442,8 @@ class LuoguAdapter {
         let oldest = Infinity;
         let newest = -Infinity;
         let previousInPage = Infinity;
-        for (const record of records) {
+        let boundaryIndex = -1;
+        for (const [recordIndex, record] of records.entries()) {
           const normalized = normalizeLuoguSubmission(record, options);
           if (normalized.submittedAt > previousInPage) {
             throw new OJMonitorError("schema-changed", "洛谷记录不再按提交时间倒序排列，不能证明分页完整");
@@ -1391,12 +1451,29 @@ class LuoguAdapter {
           previousInPage = normalized.submittedAt;
           oldest = Math.min(oldest, normalized.submittedAt);
           newest = Math.max(newest, normalized.submittedAt);
+          if (boundaryValid && normalized.submissionId === resumeBoundary.submissionId) {
+            if (normalized.submittedAt !== resumeBoundary.submittedAt) {
+              boundaryValid = false;
+              boundaryMatched = false;
+            } else {
+              boundaryIndex = recordIndex;
+            }
+          }
           if (normalized.submittedAt >= options.from && normalized.submittedAt <= options.to) submissions.push(normalized);
         }
         if (newest > previousOldest) {
           throw new OJMonitorError("schema-changed", "洛谷跨页记录顺序异常，不能证明分页完整");
         }
         previousOldest = oldest;
+        resumeBoundaryCandidate = {
+          submissionId: String(records.at(-1)?.id ?? records.at(-1)?.rid),
+          submittedAt: previousOldest
+        };
+        if (boundaryIndex >= 0) boundaryMatched = true;
+        if (boundaryValid && boundaryMatched && oldest < resumeBoundary.submittedAt) {
+          stopReason = "reached-known-boundary";
+          break;
+        }
         if (oldest < options.from) {
           stopReason = "reached-from";
           break;
@@ -1437,7 +1514,8 @@ class LuoguAdapter {
           transportAttempts,
           pagesFetched,
           pageSize,
-          totalCount
+          totalCount,
+          ...(resumeBoundaryCandidate ? { resumeBoundary: resumeBoundaryCandidate } : {})
         }
       });
     } catch (error) {
@@ -1453,7 +1531,8 @@ class LuoguAdapter {
           transportAttempts: transportAttempts || error.details?.transportAttempts,
           pagesFetched,
           pageSize,
-          totalCount
+          totalCount,
+          ...(resumeBoundaryCandidate ? { resumeBoundary: resumeBoundaryCandidate } : {})
         }
       });
     }
@@ -2035,7 +2114,7 @@ module.exports = {
 "use strict";
 
 const { OJMonitorError } = __require("src/core.js");
-const { failureResult, makeResult, validationFailure } = __require("src/adapters/common.js");
+const { failureResult, makeResult, normalizeResumeBoundary, validationFailure } = __require("src/adapters/common.js");
 
 const BASE = "https://ac.nowcoder.com";
 const PAGE_SIZE = 50;
@@ -2491,6 +2570,9 @@ class NowcoderAdapter {
     let stopReason = "unknown";
     let resolution;
     let resultOptions = options;
+    const resumeBoundary = normalizeResumeBoundary(options.resumeBoundary);
+    let boundaryMatched = false;
+    let boundaryValid = Boolean(resumeBoundary);
     try {
       resolution = await this.resolveIdentifier(options.username, { signal: options.signal });
       const recordUsername = resolution.canonicalName || resolution.uid;
@@ -2526,16 +2608,30 @@ class NowcoderAdapter {
 
         let previous = Infinity;
         let newest = -Infinity;
+        let boundarySeen = false;
         for (const submission of parsed.submissions) {
           if (submission.submittedAt > previous) throw new OJMonitorError("schema-changed", "牛客提交不再按时间倒序排列");
           previous = submission.submittedAt;
           newest = Math.max(newest, submission.submittedAt);
+          if (boundaryValid && submission.submissionId === resumeBoundary.submissionId) {
+            if (submission.submittedAt !== resumeBoundary.submittedAt) {
+              boundaryValid = false;
+              boundaryMatched = false;
+            } else {
+              boundarySeen = true;
+            }
+          }
           seenIds.add(submission.submissionId);
           if (submission.submittedAt >= options.from && submission.submittedAt <= options.to) submissions.push(submission);
         }
         const oldest = Math.min(...parsed.submissions.map((item) => item.submittedAt));
         if (newest > previousOldest) throw new OJMonitorError("schema-changed", "牛客跨页提交时间回跳，无法证明分页完整");
         previousOldest = oldest;
+        if (boundarySeen) boundaryMatched = true;
+        if (boundaryValid && boundaryMatched && oldest < resumeBoundary.submittedAt) {
+          stopReason = "reached-known-boundary";
+          break;
+        }
         if (oldest < options.from) {
           stopReason = "reached-from";
           break;
@@ -2556,7 +2652,7 @@ class NowcoderAdapter {
           break;
         }
       }
-      const complete = ["reached-from", "empty-page", "last-page"].includes(stopReason);
+      const complete = ["reached-from", "reached-known-boundary", "empty-page", "last-page"].includes(stopReason);
       const warnings = {
         "page-limit": `牛客分页达到配置的 ${this.maxPages} 页上限`,
         "repeated-page": "牛客返回重复分页，无法证明完整覆盖",
@@ -2606,7 +2702,7 @@ module.exports = {
 
 const { OJMonitorError } = __require("src/core.js");
 const { isSameOrigin, pageTransportAvailable } = __require("src/request.js");
-const { failureResult, makeResult, validationFailure } = __require("src/adapters/common.js");
+const { failureResult, makeResult, normalizeResumeBoundary, validationFailure } = __require("src/adapters/common.js");
 
 // Pages are time-ordered and are fetched until options.from is crossed.
 // A page limit is only used when explicitly injected for testing/diagnostics.
@@ -2918,6 +3014,9 @@ class QojAdapter {
     let previousOldest = Infinity;
     let transportUsed;
     let attemptedTransports;
+    const resumeBoundary = normalizeResumeBoundary(options.resumeBoundary);
+    let boundaryMatched = false;
+    let boundaryValid = Boolean(resumeBoundary);
     try {
       const validation = await this.validateUser(options.username, { signal: options.signal });
       if (validation.exists === false) throw new OJMonitorError("not-found", validation.message || "QOJ 用户不存在");
@@ -2949,15 +3048,29 @@ class QojAdapter {
         signatures.add(parsed.signature);
         let previous = Infinity;
         let newest = -Infinity;
+        let boundarySeen = false;
         for (const submission of parsed.submissions) {
           if (submission.submittedAt > previous) throw new OJMonitorError("schema-changed", "QOJ 提交不再按时间倒序排列");
           previous = submission.submittedAt;
           newest = Math.max(newest, submission.submittedAt);
+          if (boundaryValid && submission.submissionId === resumeBoundary.submissionId) {
+            if (submission.submittedAt !== resumeBoundary.submittedAt) {
+              boundaryValid = false;
+              boundaryMatched = false;
+            } else {
+              boundarySeen = true;
+            }
+          }
           if (submission.submittedAt >= options.from && submission.submittedAt <= options.to) submissions.push(submission);
         }
         const oldest = Math.min(...parsed.submissions.map((item) => item.submittedAt));
         if (newest > previousOldest) throw new OJMonitorError("schema-changed", "QOJ 跨页提交顺序异常，不能证明分页完整");
         previousOldest = oldest;
+        if (boundarySeen) boundaryMatched = true;
+        if (boundaryValid && boundaryMatched && oldest < resumeBoundary.submittedAt) {
+          stopReason = "reached-known-boundary";
+          break;
+        }
         if (oldest < options.from) {
           stopReason = "reached-from";
           break;
@@ -3019,6 +3132,7 @@ const { OJMonitorError } = __require("src/core.js");
 const {
   failureResult,
   makeResult,
+  normalizeResumeBoundary,
   requireArray,
   requireFinite,
   requireText,
@@ -3090,17 +3204,43 @@ class VJudgeAdapter {
 
   async fetchSlice(options, resultFilter = "all") {
     const records = [];
+    const resumeBoundary = normalizeResumeBoundary(options.resumeBoundary);
+    let boundaryMatched = false;
+    let boundaryValid = Boolean(resumeBoundary);
+    let previousOldest = Infinity;
     for (const start of [0, 100]) {
       const page = await this.fetchPage(options, start, resultFilter);
+      let previous = Infinity;
+      let newest = -Infinity;
+      for (const record of page) {
+        const submittedAt = requireFinite(record?.time, "VJudge time");
+        if (submittedAt > previous) throw new OJMonitorError("schema-changed", "VJudge 提交不再按时间倒序排列");
+        previous = submittedAt;
+        newest = Math.max(newest, submittedAt);
+      }
+      if (newest > previousOldest) throw new OJMonitorError("schema-changed", "VJudge 跨页提交时间回跳，不能安全剪枝");
+      const oldestOnPage = page.length ? Math.min(...page.map((record) => Number(record.time))) : Infinity;
+      previousOldest = oldestOnPage;
       records.push(...page);
+      const match = boundaryValid && page.find((record) => String(record?.runId) === resumeBoundary.submissionId);
+      if (match) {
+        if (Number(match.time) !== resumeBoundary.submittedAt) {
+          boundaryValid = false;
+          boundaryMatched = false;
+        } else boundaryMatched = true;
+      }
+      if (boundaryValid && boundaryMatched && oldestOnPage < resumeBoundary.submittedAt) {
+        break;
+      }
       if (page.length < 100) break;
       const oldest = Math.min(...page.map((record) => requireFinite(record?.time, "VJudge time")));
       if (oldest < options.from) break;
     }
     const relevant = records.filter((record) => Number(record.time) >= options.from && Number(record.time) <= options.to);
     const oldest = records.length ? Math.min(...records.map((record) => Number(record.time))) : Infinity;
-    const complete = records.length < 200 || oldest < options.from;
-    return { records: relevant, complete, totalFetched: records.length };
+    const reachedBoundary = boundaryValid && boundaryMatched && oldest < resumeBoundary.submittedAt;
+    const complete = reachedBoundary || records.length < 200 || oldest < options.from;
+    return { records: relevant, complete, totalFetched: records.length, reachedBoundary };
   }
 
   async fetchSubmissions(options) {
@@ -3397,7 +3537,9 @@ module.exports = { DomainRateLimiter, LeaseCoordinator, delay };
 "use strict";
 
 const { aggregateDaily, mergeSubmissions, recentDateKeys } = __require("src/core.js");
-const { failureResult } = __require("src/adapters/common.js");
+const { failureResult, newestResumeBoundary } = __require("src/adapters/common.js");
+
+const FULL_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 function sourceIdentity(result) {
   return [result.groupId, result.accountId, result.judge, result.scope].join(":");
@@ -3412,6 +3554,15 @@ function firstDateEpoch(dateKey, timeZone) {
 function windowBounds(settings, now = Date.now()) {
   const dateKeys = recentDateKeys(settings.days, now, settings.timeZone);
   return { dateKeys, from: firstDateEpoch(dateKeys[0], settings.timeZone), to: now };
+}
+
+function sourceResumeBoundary(state) {
+  return state?.diagnostics?.resumeBoundary || null;
+}
+
+function trustedSourceState(state) {
+  if (state?.trusted?.coverage?.complete === true) return state.trusted;
+  return state?.coverage?.complete === true ? state : null;
 }
 
 class Diagnostics {
@@ -3451,11 +3602,17 @@ class MonitorService {
     const previousStates = await Promise.all(selectedScopes.map((scope) =>
       this.store.loadSourceState([group.id, account.id, account.judge, scope].join(":"))
     ));
-    const canIncrement = previousStates.length > 0 && previousStates.every((state) =>
+    const previousTrustedStates = previousStates.map(trustedSourceState);
+    const previousTrustedByScope = Object.fromEntries(selectedScopes.map((scope, index) => [scope, previousTrustedStates[index]]));
+    const canIncrement = previousTrustedStates.length > 0 && previousTrustedStates.every((state) =>
       state?.coverage?.complete === true && state.coverage.from <= bounds.from && Number.isFinite(state.coverage.to)
     );
-    const previousTo = canIncrement ? Math.min(...previousStates.map((state) => state.coverage.to)) : bounds.from;
-    const queryFrom = canIncrement ? Math.max(bounds.from, previousTo - 86400000) : bounds.from;
+    const previousTo = canIncrement ? Math.min(...previousTrustedStates.map((state) => state.coverage.to)) : bounds.from;
+    const previousFullScanAt = canIncrement && previousTrustedStates.every((state) => Number.isFinite(state?.diagnostics?.fullScanAt))
+      ? Math.min(...previousTrustedStates.map((state) => state.diagnostics.fullScanAt))
+      : null;
+    const fullScanDue = !Number.isFinite(previousFullScanAt) || bounds.to - previousFullScanAt >= FULL_REFRESH_INTERVAL_MS;
+    const queryFrom = canIncrement && !fullScanDue ? Math.max(bounds.from, previousTo - 86400000) : bounds.from;
     const base = {
       groupId: group.id,
       accountId: account.id,
@@ -3464,6 +3621,11 @@ class MonitorService {
       to: bounds.to,
       signal
     };
+    const resumeBoundaries = Object.fromEntries(selectedScopes.map((scope, index) => [
+      scope, canIncrement && !fullScanDue && account.judge !== "atcoder" ? sourceResumeBoundary(previousTrustedStates[index]) : null
+    ]).filter(([_scope, boundary]) => boundary));
+    if (account.judge === "codeforces" && selectedScopes.every((scope) => resumeBoundaries[scope])) base.resumeBoundaries = resumeBoundaries;
+    else base.resumeBoundary = resumeBoundaries.default || null;
     const adapter = this.adapters[account.judge];
     onProgress?.({ type: "source-start", group, account });
     const startedAt = this.clock();
@@ -3496,7 +3658,20 @@ class MonitorService {
     for (const result of results) {
       if (canIncrement && result.coverage.complete) {
         result.coverage.from = bounds.from;
-        result.diagnostics = { ...result.diagnostics, incrementalFrom: queryFrom };
+        result.diagnostics = {
+          ...result.diagnostics,
+          ...(fullScanDue ? { fullRefreshFrom: queryFrom } : { incrementalFrom: queryFrom })
+        };
+      }
+      if (result.coverage.complete) {
+        const previousBoundary = sourceResumeBoundary(previousTrustedByScope[result.scope]);
+        const boundary = newestResumeBoundary(result.submissions) || previousBoundary;
+        const priorFullScanAt = previousTrustedByScope[result.scope]?.diagnostics?.fullScanAt;
+        result.diagnostics = {
+          ...result.diagnostics,
+          ...(boundary ? { resumeBoundary: boundary } : { resumeBoundary: undefined }),
+          fullScanAt: fullScanDue ? bounds.to : priorFullScanAt
+        };
       }
       this.diagnostics.add({
         judge: result.judge,
@@ -3591,7 +3766,7 @@ class MonitorService {
   }
 }
 
-module.exports = { Diagnostics, MonitorService, firstDateEpoch, sourceIdentity, windowBounds };
+module.exports = { Diagnostics, FULL_REFRESH_INTERVAL_MS, MonitorService, firstDateEpoch, sourceIdentity, trustedSourceState, windowBounds };
 
 },
 "src/site-bridge.js": function(module, exports, __require) {
@@ -4127,7 +4302,13 @@ class Store {
   }
 
   async saveSourceState(identity, state) {
-    return this.setAtomic(`source:${identity}`, state);
+    const previous = await this.loadSourceState(identity);
+    const previousTrusted = previous?.trusted || (previous?.coverage?.complete === true
+      ? Object.fromEntries(Object.entries(previous).filter(([key]) => key !== "trusted"))
+      : null);
+    const current = Object.fromEntries(Object.entries(state || {}).filter(([key]) => key !== "trusted"));
+    const trusted = current?.coverage?.complete === true ? current : previousTrusted;
+    return this.setAtomic(`source:${identity}`, { ...current, ...(trusted ? { trusted } : {}) });
   }
 
   async loadSourceState(identity) {

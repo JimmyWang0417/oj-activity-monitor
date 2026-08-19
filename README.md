@@ -74,7 +74,8 @@ OJ Activity Monitor（仓库名：`oj-activity-monitor`）是一个本地优先�
 - `www.luogu.com.cn` 和 QOJ 标签页会注册同源会话代理；面板可在任意受支持的 OJ 页面打开，登录/验证受限请求通过共享存储交给目标站点标签页的页面主世界执行并返回，不要求在目标页重新打开面板。目标标签页需保持打开并运行同一新版脚本。
 - Firefox 的页面 binding 降级会用 `cloneInto`（可用时）或页面 realm 构造器创建 fetch 参数，避免把油猴 sandbox 对象直接传入 Xray 包装的页面函数。普通 GM 请求默认使用 Tampermonkey 的常规 Cookie jar；只有调用者明确给出分区键时才使用 `cookiePartition`。
 - 提交按账号/网站/来源/月分块，每日统计按分组/账号/来源/年分块。
-- 后续刷新复用已完整覆盖的缓存，只向前重叠一天增量抓取。
+- 后续刷新复用最近一次完整覆盖留下的可信提交边界；按时间倒序的来源在重新遇到该 submission ID 且继续读到严格更早的时间后即可停止分页。可信 ID 消失或时间变化时自动回退原有时间下界；AtCoder 继续使用其原生 `from_second` 游标。
+- 提交缓存只按 submission ID 合并更新，不会用本轮固定页数或 `partial` 结果覆盖历史记录；同 ID 重判会更新 verdict 而不重复计数。来源状态分别保存“本轮结果”和“最近一次完整可信状态”，失败/截断不会清空可信边界；每 24 小时禁用 ID 快路径并从统计窗口起点校准一次，以捕获迟到记录和重判。
 - 全局刷新使用带所有者、代次、到期时间和心跳的共享租约；非 owner 标签页会等待并自动读取共享结果，owner 崩溃且租约过期后自动接管；域名请求串行并共享下一允许请求时间。
 - 只有实际打开的面板会自动获取，最短缓存有效期为 15 分钟；获取过程可取消。
 - 诊断日志只包含来源、状态、耗时、数量、页面 origin、分页停止原因及脱敏传输链。洛谷的 `transportAttempts` 逐跳记录 requested/actual transport、错误状态、HTTP 状态和去除 query/hash 的最终 origin+pathname；若页面传输因不同源或缺少 DOM/CustomEvent 而根本不能尝试，也会以 `actual: "not-attempted"` 和具体原因留痕。主世界安装失败后回退到 Firefox binding 时保留 `fallback` 原因。不包含 Cookie、Token 或完整请求参数。

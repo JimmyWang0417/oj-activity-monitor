@@ -2,7 +2,7 @@
 
 const { OJMonitorError } = require("../core");
 const { isSameOrigin, pageTransportAvailable } = require("../request");
-const { failureResult, makeResult, validationFailure } = require("./common");
+const { failureResult, makeResult, normalizeResumeBoundary, validationFailure } = require("./common");
 
 // Pages are time-ordered and are fetched until options.from is crossed.
 // A page limit is only used when explicitly injected for testing/diagnostics.
@@ -314,6 +314,9 @@ class QojAdapter {
     let previousOldest = Infinity;
     let transportUsed;
     let attemptedTransports;
+    const resumeBoundary = normalizeResumeBoundary(options.resumeBoundary);
+    let boundaryMatched = false;
+    let boundaryValid = Boolean(resumeBoundary);
     try {
       const validation = await this.validateUser(options.username, { signal: options.signal });
       if (validation.exists === false) throw new OJMonitorError("not-found", validation.message || "QOJ 用户不存在");
@@ -345,15 +348,29 @@ class QojAdapter {
         signatures.add(parsed.signature);
         let previous = Infinity;
         let newest = -Infinity;
+        let boundarySeen = false;
         for (const submission of parsed.submissions) {
           if (submission.submittedAt > previous) throw new OJMonitorError("schema-changed", "QOJ 提交不再按时间倒序排列");
           previous = submission.submittedAt;
           newest = Math.max(newest, submission.submittedAt);
+          if (boundaryValid && submission.submissionId === resumeBoundary.submissionId) {
+            if (submission.submittedAt !== resumeBoundary.submittedAt) {
+              boundaryValid = false;
+              boundaryMatched = false;
+            } else {
+              boundarySeen = true;
+            }
+          }
           if (submission.submittedAt >= options.from && submission.submittedAt <= options.to) submissions.push(submission);
         }
         const oldest = Math.min(...parsed.submissions.map((item) => item.submittedAt));
         if (newest > previousOldest) throw new OJMonitorError("schema-changed", "QOJ 跨页提交顺序异常，不能证明分页完整");
         previousOldest = oldest;
+        if (boundarySeen) boundaryMatched = true;
+        if (boundaryValid && boundaryMatched && oldest < resumeBoundary.submittedAt) {
+          stopReason = "reached-known-boundary";
+          break;
+        }
         if (oldest < options.from) {
           stopReason = "reached-from";
           break;

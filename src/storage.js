@@ -283,7 +283,13 @@ class Store {
   }
 
   async saveSourceState(identity, state) {
-    return this.setAtomic(`source:${identity}`, state);
+    const previous = await this.loadSourceState(identity);
+    const previousTrusted = previous?.trusted || (previous?.coverage?.complete === true
+      ? Object.fromEntries(Object.entries(previous).filter(([key]) => key !== "trusted"))
+      : null);
+    const current = Object.fromEntries(Object.entries(state || {}).filter(([key]) => key !== "trusted"));
+    const trusted = current?.coverage?.complete === true ? current : previousTrusted;
+    return this.setAtomic(`source:${identity}`, { ...current, ...(trusted ? { trusted } : {}) });
   }
 
   async loadSourceState(identity) {

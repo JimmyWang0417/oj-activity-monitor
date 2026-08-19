@@ -4,6 +4,7 @@ const { OJMonitorError } = require("../core");
 const {
   failureResult,
   makeResult,
+  normalizeResumeBoundary,
   requireArray,
   requireFinite,
   requireText,
@@ -75,17 +76,43 @@ class VJudgeAdapter {
 
   async fetchSlice(options, resultFilter = "all") {
     const records = [];
+    const resumeBoundary = normalizeResumeBoundary(options.resumeBoundary);
+    let boundaryMatched = false;
+    let boundaryValid = Boolean(resumeBoundary);
+    let previousOldest = Infinity;
     for (const start of [0, 100]) {
       const page = await this.fetchPage(options, start, resultFilter);
+      let previous = Infinity;
+      let newest = -Infinity;
+      for (const record of page) {
+        const submittedAt = requireFinite(record?.time, "VJudge time");
+        if (submittedAt > previous) throw new OJMonitorError("schema-changed", "VJudge 提交不再按时间倒序排列");
+        previous = submittedAt;
+        newest = Math.max(newest, submittedAt);
+      }
+      if (newest > previousOldest) throw new OJMonitorError("schema-changed", "VJudge 跨页提交时间回跳，不能安全剪枝");
+      const oldestOnPage = page.length ? Math.min(...page.map((record) => Number(record.time))) : Infinity;
+      previousOldest = oldestOnPage;
       records.push(...page);
+      const match = boundaryValid && page.find((record) => String(record?.runId) === resumeBoundary.submissionId);
+      if (match) {
+        if (Number(match.time) !== resumeBoundary.submittedAt) {
+          boundaryValid = false;
+          boundaryMatched = false;
+        } else boundaryMatched = true;
+      }
+      if (boundaryValid && boundaryMatched && oldestOnPage < resumeBoundary.submittedAt) {
+        break;
+      }
       if (page.length < 100) break;
       const oldest = Math.min(...page.map((record) => requireFinite(record?.time, "VJudge time")));
       if (oldest < options.from) break;
     }
     const relevant = records.filter((record) => Number(record.time) >= options.from && Number(record.time) <= options.to);
     const oldest = records.length ? Math.min(...records.map((record) => Number(record.time))) : Infinity;
-    const complete = records.length < 200 || oldest < options.from;
-    return { records: relevant, complete, totalFetched: records.length };
+    const reachedBoundary = boundaryValid && boundaryMatched && oldest < resumeBoundary.submittedAt;
+    const complete = reachedBoundary || records.length < 200 || oldest < options.from;
+    return { records: relevant, complete, totalFetched: records.length, reachedBoundary };
   }
 
   async fetchSubmissions(options) {

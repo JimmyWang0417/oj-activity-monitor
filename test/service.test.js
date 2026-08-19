@@ -2,7 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { MonitorService, windowBounds } = require("../src/service");
+const { FULL_REFRESH_INTERVAL_MS, MonitorService, windowBounds } = require("../src/service");
 const { MemoryBackend, Store } = require("../src/storage");
 
 const now = Date.parse("2026-08-07T12:00:00+08:00");
@@ -80,4 +80,96 @@ test("a complete cached window makes the next refresh overlap only one day", asy
   assert.deepEqual(new Set(seenFrom), new Set([now - 86400000]));
   const state = await store.loadSourceState("g:cf:codeforces:problemset");
   assert.equal(state.coverage.from, windowBounds(config.settings, now).from);
+});
+
+test("a complete cached source passes its newest trusted record as the next resume boundary", async () => {
+  const store = new Store(new MemoryBackend());
+  const received = [];
+  const baseSubmission = (base, id, submittedAt, scope) => ({
+    ...base, judge: "codeforces", scope, submissionId: id,
+    problemKey: `codeforces:${scope}:1:A`, submittedAt, verdict: "OK", accepted: true
+  });
+  const adapters = {
+    codeforces: { fetchBoth: async (base) => {
+      received.push(base.resumeBoundaries || {});
+      return {
+        problemset: result(base, "codeforces", "problemset", [baseSubmission(base, "p1", now - 1000, "problemset")]),
+        gym: result(base, "codeforces", "gym", [baseSubmission(base, "g1", now - 2000, "gym")])
+      };
+    } },
+    atcoder: { fetchSubmissions: async (base) => result(base, "atcoder", "default") }
+  };
+  const service = new MonitorService({ store, adapters, clock: () => now });
+  await service.refresh(config);
+  await service.refresh(config);
+  assert.deepEqual(received[0], {});
+  assert.deepEqual(received[1], {
+    problemset: { submissionId: "p1", submittedAt: now - 1000 },
+    gym: { submissionId: "g1", submittedAt: now - 2000 }
+  });
+});
+
+test("partial history disables trusted-boundary pruning", async () => {
+  const store = new Store(new MemoryBackend());
+  await store.saveSourceState("g:at:atcoder:default", {
+    coverage: { complete: false, from: 0, to: now - 1000 },
+    diagnostics: { resumeBoundary: { submissionId: "stale", submittedAt: now - 2000 }, fullScanAt: now }
+  });
+  let seen;
+  const adapters = {
+    codeforces: { fetchBoth: async (base) => ({ problemset: result(base, "codeforces", "problemset"), gym: result(base, "codeforces", "gym") }) },
+    atcoder: { fetchSubmissions: async (base) => { seen = base; return result(base, "atcoder", "default"); } }
+  };
+  await new MonitorService({ store, adapters, clock: () => now }).refresh(config);
+  assert.equal(seen.resumeBoundary, null);
+  assert.equal(seen.from, windowBounds(config.settings, now).from);
+});
+
+test("trusted-boundary pruning is disabled for a periodic full-window refresh", async () => {
+  const store = new Store(new MemoryBackend());
+  const bounds = windowBounds(config.settings, now);
+  for (const scope of ["problemset", "gym"]) {
+    await store.saveSourceState(`g:cf:codeforces:${scope}`, {
+      coverage: { complete: true, from: bounds.from, to: now - 1000 },
+      diagnostics: {
+        resumeBoundary: { submissionId: `${scope}-old`, submittedAt: now - 2000 },
+        fullScanAt: now - FULL_REFRESH_INTERVAL_MS
+      }
+    });
+  }
+  let seen;
+  const adapters = {
+    codeforces: { fetchBoth: async (base) => {
+      seen = base;
+      return { problemset: result(base, "codeforces", "problemset"), gym: result(base, "codeforces", "gym") };
+    } },
+    atcoder: { fetchSubmissions: async (base) => result(base, "atcoder", "default") }
+  };
+  await new MonitorService({ store, adapters, clock: () => now }).refresh(config);
+  assert.equal(seen.resumeBoundaries, undefined);
+  assert.equal(seen.from, bounds.from);
+});
+
+test("a partial refresh keeps using the previous complete trusted source cache", async () => {
+  const store = new Store(new MemoryBackend());
+  const bounds = windowBounds(config.settings, now);
+  const identity = "g:at:atcoder:default";
+  await store.saveSourceState(identity, {
+    status: "ok",
+    coverage: { complete: true, from: bounds.from, to: now - 1000 },
+    diagnostics: { resumeBoundary: { submissionId: "trusted", submittedAt: now - 2000 }, fullScanAt: now }
+  });
+  await store.saveSourceState(identity, {
+    status: "partial",
+    coverage: { complete: false, from: now - 86400000, to: now, reason: "page-limit" },
+    diagnostics: { stopReason: "page-limit" }
+  });
+  let seen;
+  const adapters = {
+    codeforces: { fetchBoth: async (base) => ({ problemset: result(base, "codeforces", "problemset"), gym: result(base, "codeforces", "gym") }) },
+    atcoder: { fetchSubmissions: async (base) => { seen = base; return result(base, "atcoder", "default"); } }
+  };
+  await new MonitorService({ store, adapters, clock: () => now }).refresh(config);
+  assert.equal(seen.from, now - 1000 - 86400000);
+  assert.equal(seen.resumeBoundary, null, "AtCoder continues to use its native from_second cursor");
 });

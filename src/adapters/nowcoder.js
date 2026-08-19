@@ -1,7 +1,7 @@
 "use strict";
 
 const { OJMonitorError } = require("../core");
-const { failureResult, makeResult, validationFailure } = require("./common");
+const { failureResult, makeResult, normalizeResumeBoundary, validationFailure } = require("./common");
 
 const BASE = "https://ac.nowcoder.com";
 const PAGE_SIZE = 50;
@@ -457,6 +457,9 @@ class NowcoderAdapter {
     let stopReason = "unknown";
     let resolution;
     let resultOptions = options;
+    const resumeBoundary = normalizeResumeBoundary(options.resumeBoundary);
+    let boundaryMatched = false;
+    let boundaryValid = Boolean(resumeBoundary);
     try {
       resolution = await this.resolveIdentifier(options.username, { signal: options.signal });
       const recordUsername = resolution.canonicalName || resolution.uid;
@@ -492,16 +495,30 @@ class NowcoderAdapter {
 
         let previous = Infinity;
         let newest = -Infinity;
+        let boundarySeen = false;
         for (const submission of parsed.submissions) {
           if (submission.submittedAt > previous) throw new OJMonitorError("schema-changed", "牛客提交不再按时间倒序排列");
           previous = submission.submittedAt;
           newest = Math.max(newest, submission.submittedAt);
+          if (boundaryValid && submission.submissionId === resumeBoundary.submissionId) {
+            if (submission.submittedAt !== resumeBoundary.submittedAt) {
+              boundaryValid = false;
+              boundaryMatched = false;
+            } else {
+              boundarySeen = true;
+            }
+          }
           seenIds.add(submission.submissionId);
           if (submission.submittedAt >= options.from && submission.submittedAt <= options.to) submissions.push(submission);
         }
         const oldest = Math.min(...parsed.submissions.map((item) => item.submittedAt));
         if (newest > previousOldest) throw new OJMonitorError("schema-changed", "牛客跨页提交时间回跳，无法证明分页完整");
         previousOldest = oldest;
+        if (boundarySeen) boundaryMatched = true;
+        if (boundaryValid && boundaryMatched && oldest < resumeBoundary.submittedAt) {
+          stopReason = "reached-known-boundary";
+          break;
+        }
         if (oldest < options.from) {
           stopReason = "reached-from";
           break;
@@ -522,7 +539,7 @@ class NowcoderAdapter {
           break;
         }
       }
-      const complete = ["reached-from", "empty-page", "last-page"].includes(stopReason);
+      const complete = ["reached-from", "reached-known-boundary", "empty-page", "last-page"].includes(stopReason);
       const warnings = {
         "page-limit": `牛客分页达到配置的 ${this.maxPages} 页上限`,
         "repeated-page": "牛客返回重复分页，无法证明完整覆盖",

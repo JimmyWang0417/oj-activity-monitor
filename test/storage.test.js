@@ -31,6 +31,36 @@ test("submission chunks merge idempotently and can be removed per account", asyn
   assert.equal(await store.loadSourceState("g:a:atcoder:default"), null);
 });
 
+test("submission cache keeps older fixed-window records and upserts rejudged IDs", async () => {
+  const store = new Store(new MemoryBackend());
+  const older = item("old", "01");
+  const recent = item("recent", "02");
+  await store.mergeSubmissions([older, recent]);
+  await store.mergeSubmissions([{ ...recent, verdict: "WA", accepted: false }]);
+  const cached = await store.loadSubmissions();
+  assert.deepEqual(cached.map((item) => item.submissionId), ["old", "recent"]);
+  assert.equal(cached.find((item) => item.submissionId === "recent").verdict, "WA");
+  assert.equal(cached.find((item) => item.submissionId === "recent").accepted, false);
+});
+
+test("partial source state preserves the last complete trusted cache", async () => {
+  const store = new Store(new MemoryBackend());
+  const complete = {
+    status: "ok",
+    coverage: { from: 1, to: 10, complete: true },
+    diagnostics: { resumeBoundary: { submissionId: "10", submittedAt: 10 }, fullScanAt: 10 }
+  };
+  await store.saveSourceState("g:a:vjudge:default", complete);
+  await store.saveSourceState("g:a:vjudge:default", {
+    status: "partial",
+    coverage: { from: 5, to: 20, complete: false, reason: "slice-truncated" },
+    diagnostics: { stopReason: "slice-truncated" }
+  });
+  const state = await store.loadSourceState("g:a:vjudge:default");
+  assert.equal(state.status, "partial");
+  assert.deepEqual(state.trusted, complete);
+});
+
 test("failed atomic replacement keeps the previously committed value readable", async () => {
   class QuotaBackend extends MemoryBackend {
     constructor() { super(); this.failMainWrite = false; }

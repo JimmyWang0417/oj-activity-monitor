@@ -1,7 +1,9 @@
 "use strict";
 
 const { aggregateDaily, mergeSubmissions, recentDateKeys } = require("./core");
-const { failureResult } = require("./adapters/common");
+const { failureResult, newestResumeBoundary } = require("./adapters/common");
+
+const FULL_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 function sourceIdentity(result) {
   return [result.groupId, result.accountId, result.judge, result.scope].join(":");
@@ -16,6 +18,15 @@ function firstDateEpoch(dateKey, timeZone) {
 function windowBounds(settings, now = Date.now()) {
   const dateKeys = recentDateKeys(settings.days, now, settings.timeZone);
   return { dateKeys, from: firstDateEpoch(dateKeys[0], settings.timeZone), to: now };
+}
+
+function sourceResumeBoundary(state) {
+  return state?.diagnostics?.resumeBoundary || null;
+}
+
+function trustedSourceState(state) {
+  if (state?.trusted?.coverage?.complete === true) return state.trusted;
+  return state?.coverage?.complete === true ? state : null;
 }
 
 class Diagnostics {
@@ -55,11 +66,17 @@ class MonitorService {
     const previousStates = await Promise.all(selectedScopes.map((scope) =>
       this.store.loadSourceState([group.id, account.id, account.judge, scope].join(":"))
     ));
-    const canIncrement = previousStates.length > 0 && previousStates.every((state) =>
+    const previousTrustedStates = previousStates.map(trustedSourceState);
+    const previousTrustedByScope = Object.fromEntries(selectedScopes.map((scope, index) => [scope, previousTrustedStates[index]]));
+    const canIncrement = previousTrustedStates.length > 0 && previousTrustedStates.every((state) =>
       state?.coverage?.complete === true && state.coverage.from <= bounds.from && Number.isFinite(state.coverage.to)
     );
-    const previousTo = canIncrement ? Math.min(...previousStates.map((state) => state.coverage.to)) : bounds.from;
-    const queryFrom = canIncrement ? Math.max(bounds.from, previousTo - 86400000) : bounds.from;
+    const previousTo = canIncrement ? Math.min(...previousTrustedStates.map((state) => state.coverage.to)) : bounds.from;
+    const previousFullScanAt = canIncrement && previousTrustedStates.every((state) => Number.isFinite(state?.diagnostics?.fullScanAt))
+      ? Math.min(...previousTrustedStates.map((state) => state.diagnostics.fullScanAt))
+      : null;
+    const fullScanDue = !Number.isFinite(previousFullScanAt) || bounds.to - previousFullScanAt >= FULL_REFRESH_INTERVAL_MS;
+    const queryFrom = canIncrement && !fullScanDue ? Math.max(bounds.from, previousTo - 86400000) : bounds.from;
     const base = {
       groupId: group.id,
       accountId: account.id,
@@ -68,6 +85,11 @@ class MonitorService {
       to: bounds.to,
       signal
     };
+    const resumeBoundaries = Object.fromEntries(selectedScopes.map((scope, index) => [
+      scope, canIncrement && !fullScanDue && account.judge !== "atcoder" ? sourceResumeBoundary(previousTrustedStates[index]) : null
+    ]).filter(([_scope, boundary]) => boundary));
+    if (account.judge === "codeforces" && selectedScopes.every((scope) => resumeBoundaries[scope])) base.resumeBoundaries = resumeBoundaries;
+    else base.resumeBoundary = resumeBoundaries.default || null;
     const adapter = this.adapters[account.judge];
     onProgress?.({ type: "source-start", group, account });
     const startedAt = this.clock();
@@ -100,7 +122,20 @@ class MonitorService {
     for (const result of results) {
       if (canIncrement && result.coverage.complete) {
         result.coverage.from = bounds.from;
-        result.diagnostics = { ...result.diagnostics, incrementalFrom: queryFrom };
+        result.diagnostics = {
+          ...result.diagnostics,
+          ...(fullScanDue ? { fullRefreshFrom: queryFrom } : { incrementalFrom: queryFrom })
+        };
+      }
+      if (result.coverage.complete) {
+        const previousBoundary = sourceResumeBoundary(previousTrustedByScope[result.scope]);
+        const boundary = newestResumeBoundary(result.submissions) || previousBoundary;
+        const priorFullScanAt = previousTrustedByScope[result.scope]?.diagnostics?.fullScanAt;
+        result.diagnostics = {
+          ...result.diagnostics,
+          ...(boundary ? { resumeBoundary: boundary } : { resumeBoundary: undefined }),
+          fullScanAt: fullScanDue ? bounds.to : priorFullScanAt
+        };
       }
       this.diagnostics.add({
         judge: result.judge,
@@ -195,4 +230,4 @@ class MonitorService {
   }
 }
 
-module.exports = { Diagnostics, MonitorService, firstDateEpoch, sourceIdentity, windowBounds };
+module.exports = { Diagnostics, FULL_REFRESH_INTERVAL_MS, MonitorService, firstDateEpoch, sourceIdentity, trustedSourceState, windowBounds };

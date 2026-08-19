@@ -161,6 +161,26 @@ test("VJudge falls back to exhaustive result slices when base reaches 200", asyn
   assert.equal(calls, RESULT_FILTERS.length + 1);
 });
 
+test("VJudge validates descending order before a trusted-boundary shortcut", async () => {
+  const baseRecord = (runId, time) => ({ runId, oj: "CodeForces", probNum: "1A", time, statusType: 0, processing: false, status: "Accepted" });
+  const adapter = new VJudgeAdapter({ client: {}, limiter: null });
+  let calls = 0;
+  adapter.fetchPage = async (_options, start) => {
+    calls += 1;
+    if (start === 0) return Array.from({ length: 100 }, (_unused, index) => baseRecord(200 - index, 200 - index));
+    return [baseRecord(100, 100), baseRecord(99, 99)];
+  };
+  const complete = await adapter.fetchSubmissions({ ...range, resumeBoundary: { submissionId: "100", submittedAt: 100 } });
+  assert.equal(complete.status, "ok");
+  assert.equal(calls, 2);
+
+  const unordered = new VJudgeAdapter({ client: {}, limiter: null });
+  unordered.fetchPage = async () => [baseRecord(1, 1), baseRecord(2, 2)];
+  const failure = await unordered.fetchSubmissions(range);
+  assert.equal(failure.status, "schema-changed");
+  assert.equal(failure.coverage.complete, false);
+});
+
 test("Luogu content-only fixture extracts records and maps recordStatus 12 only", () => {
   const payload = fixture("luogu-content-only.json");
   const records = findRecordArray(payload);
@@ -244,6 +264,84 @@ test("Luogu repeated pagination and login shell never masquerade as complete zer
     diagnosticReason(new Error("failed https://www.luogu.com.cn/record/list?user=1&page=2#private")),
     "failed https://www.luogu.com.cn/record/list"
   );
+});
+
+test("Luogu incremental refresh stops on a trusted submission boundary", async () => {
+  let calls = 0;
+  const page = (ids) => JSON.stringify({ currentData: { records: { count: 6, result: ids.map((id) => ({
+    id, submitTime: id, status: 12, problem: { pid: `P${id}` }
+  })) } } });
+  const client = {
+    global: { location: { hostname: "luogu.com.cn", origin: "https://luogu.com.cn" } },
+    request: async (url) => {
+      calls += 1;
+      return { status: 200, text: Number(new URL(url).searchParams.get("page")) === 1 ? page([6, 5]) : page([4, 3]) };
+    }
+  };
+  const result = await new LuoguAdapter({ client, limiter: { waitTurn: async () => {} } }).fetchSubmissions({
+    ...range, username: "1", resumeBoundary: { submissionId: "4", submittedAt: 4000 }
+  });
+  assert.equal(result.status, "ok");
+  assert.equal(result.diagnostics.stopReason, "reached-known-boundary");
+  assert.equal(result.diagnostics.pagesFetched, 2);
+  assert.equal(calls, 2);
+  assert.deepEqual(result.submissions.map((item) => item.submissionId), ["3", "4", "5", "6"]);
+});
+
+test("Luogu ignores a missing trusted boundary and falls back to the time lower bound", async () => {
+  let calls = 0;
+  const client = {
+    global: { location: { hostname: "luogu.com.cn", origin: "https://luogu.com.cn" } },
+    request: async () => {
+      calls += 1;
+      return { status: 200, text: JSON.stringify({ currentData: { records: { count: 2, result: [
+        { id: 6, submitTime: 6, status: 12, problem: { pid: "P6" } },
+        { id: 5, submitTime: 5, status: 12, problem: { pid: "P5" } }
+      ] } } }) };
+    }
+  };
+  const result = await new LuoguAdapter({ client, limiter: { waitTurn: async () => {} } }).fetchSubmissions({
+    ...range, username: "1", from: 5500, resumeBoundary: { submissionId: "missing", submittedAt: 5500 }
+  });
+  assert.equal(result.status, "ok");
+  assert.equal(result.diagnostics.stopReason, "reached-from");
+  assert.equal(calls, 1);
+});
+
+test("Luogu reads past every submission sharing the trusted boundary second", async () => {
+  let calls = 0;
+  const page = (records, count = 5) => JSON.stringify({ currentData: { records: { count, result: records } } });
+  const record = (id, submitTime) => ({ id, submitTime, status: 12, problem: { pid: `P${id}` } });
+  const client = {
+    global: { location: { hostname: "luogu.com.cn", origin: "https://luogu.com.cn" } },
+    request: async () => {
+      calls += 1;
+      return { status: 200, text: calls === 1
+        ? page([record(6, 10), record(5, 10)])
+        : page([record(4, 10), record(3, 9)]) };
+    }
+  };
+  const result = await new LuoguAdapter({ client, limiter: { waitTurn: async () => {} } }).fetchSubmissions({
+    ...range, username: "1", resumeBoundary: { submissionId: "5", submittedAt: 10000 }
+  });
+  assert.equal(result.status, "ok");
+  assert.equal(result.diagnostics.stopReason, "reached-known-boundary");
+  assert.equal(calls, 2);
+  assert.deepEqual(result.submissions.map((item) => item.submissionId), ["3", "4", "5", "6"]);
+});
+
+test("Luogu falls back to the time boundary when a trusted ID timestamp changed", async () => {
+  const client = {
+    global: { location: { hostname: "luogu.com.cn", origin: "https://luogu.com.cn" } },
+    request: async () => ({ status: 200, text: JSON.stringify({ currentData: { records: { count: 1, result: [
+      { id: 6, submitTime: 6, status: 12, problem: { pid: "P6" } }
+    ] } } }) })
+  };
+  const result = await new LuoguAdapter({ client, limiter: { waitTurn: async () => {} } }).fetchSubmissions({
+    ...range, username: "1", from: 5500, resumeBoundary: { submissionId: "6", submittedAt: 5000 }
+  });
+  assert.equal(result.status, "ok");
+  assert.equal(result.diagnostics.stopReason, "last-page");
 });
 
 test("Luogu HTML login and verification responses are actionable session failures", () => {

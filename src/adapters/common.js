@@ -52,6 +52,28 @@ function validationFailure(error) {
   return { exists: null, status: errorStatus(error), message: errorMessage(error) };
 }
 
+function normalizeResumeBoundary(value) {
+  if (!value || value.submissionId === undefined || value.submittedAt === undefined) return null;
+  const submittedAt = Number(value.submittedAt);
+  const submissionId = String(value.submissionId).trim();
+  if (!submissionId || !Number.isFinite(submittedAt)) return null;
+  return { submissionId, submittedAt };
+}
+
+function newestResumeBoundary(submissions) {
+  let newest;
+  for (const submission of submissions || []) {
+    const candidate = normalizeResumeBoundary(submission);
+    if (!candidate) continue;
+    if (!newest || candidate.submittedAt > newest.submittedAt ||
+      candidate.submittedAt === newest.submittedAt && candidate.submissionId > newest.submissionId) {
+      newest = candidate;
+    }
+  }
+  return newest;
+}
+
+
 function requireArray(value, label) {
   if (!Array.isArray(value)) throw new OJMonitorError("schema-changed", `${label} 不是数组`);
   return value;
@@ -78,5 +100,7 @@ module.exports = {
   requireArray,
   requireFinite,
   requireText,
+  normalizeResumeBoundary,
+  newestResumeBoundary,
   validationFailure
 };

@@ -9,6 +9,7 @@ const {
 const {
   failureResult,
   makeResult,
+  normalizeResumeBoundary,
   requireArray,
   requireFinite,
   requireText,
@@ -178,6 +179,11 @@ class CodeforcesAdapter {
     const records = [];
     let fromIndex = 1;
     let stopReason = "empty-page";
+    const resumeBoundaries = options.resumeBoundaries || {};
+    const boundarySeen = new Set();
+    const invalidBoundaries = new Set();
+    let boundaryTime = Infinity;
+    let previousOldest = Infinity;
     for (let page = 0; page < this.maxPages; page += 1) {
       const result = requireArray(await this.api("user.status", {
         handle: options.username,
@@ -185,13 +191,37 @@ class CodeforcesAdapter {
         count: String(this.pageSize)
       }, options.signal), "Codeforces user.status result");
       if (!result.length) break;
+      let previous = Infinity;
+      let newest = -Infinity;
       for (const record of result) {
         requireFinite(record?.creationTimeSeconds, "Codeforces creationTimeSeconds");
         records.push(record);
+        const submittedAt = Number(record.creationTimeSeconds) * 1000;
+        if (submittedAt > previous) throw new OJMonitorError("schema-changed", "Codeforces 提交不再按时间倒序排列");
+        previous = submittedAt;
+        newest = Math.max(newest, submittedAt);
+        const id = String(record.id);
+        for (const scope of ["problemset", "gym"]) {
+          const boundary = normalizeResumeBoundary(resumeBoundaries[scope]);
+          if (boundary && id === boundary.submissionId) {
+            if (submittedAt !== boundary.submittedAt) invalidBoundaries.add(scope);
+            else {
+              boundarySeen.add(scope);
+              boundaryTime = Math.min(boundaryTime, boundary.submittedAt);
+            }
+          }
+        }
       }
       const oldest = Math.min(...result.map((record) => Number(record.creationTimeSeconds) * 1000));
+      if (newest > previousOldest) throw new OJMonitorError("schema-changed", "Codeforces 跨页提交时间回跳，不能安全剪枝");
+      previousOldest = oldest;
       if (oldest < options.from) {
         stopReason = "reached-from";
+        break;
+      }
+      if (Object.keys(resumeBoundaries).length > 0 && invalidBoundaries.size === 0 &&
+        Object.keys(resumeBoundaries).every((scope) => boundarySeen.has(scope)) && oldest < boundaryTime) {
+        stopReason = "reached-known-boundary";
         break;
       }
       if (result.length < this.pageSize) {
