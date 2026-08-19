@@ -252,7 +252,7 @@ State-Check: all required items terminal; no unresolved blocker/action
 - Execution scope: 允许修改 /home/jimmywang0417/oj-activity-monitor 中 VJudge 适配器、服务边界分发、存储容错、相关测试、README、版本号、构建产物及本通信文档；执行者负责实现、验证、构建、提交和推送；不得写入凭据或扩大到无关重构。
 - Review boundary: Claude 独立读取当前源码、diff、测试、公开接口复现证据和构建产物；默认只读验证，可在本文件追加 reviewer 消息、finding、decision 和 ACK；不得修改交付代码或代写执行者消息。
 - Evidence base: git:b09f01f2d5f08d70f8d947e9f71cd24a1c8e56f2
-- Review candidate: sha256:c274f061af05a7fefcee847e60c7002ff027aca38c0a587f3794c690b6b933b0
+- Review candidate: sha256:65f4063b61da2812e633dda352125391b2e04b5a0147e07938be4580bfdee4d8
 - Deliverables: VJudge 非时间排序兼容实现、最新合法数据优先与损坏缓存恢复测试、README/版本及可复现构建产物、中文 Git 提交、上游推送和本文件中的双方评审闭环。
 
 ## 协作规则
@@ -269,10 +269,10 @@ State-Check: all required items terminal; no unresolved blocker/action
 
 | 项目 | 路径/命令/版本 | 执行者已读 | 评审者已读 | 备注 |
 |---|---|---|---|---|
-| VJudge 分页与字段解析 | src/adapters/vjudge.js; test/adapters.test.js; test/fixtures/vjudge-status.json | yes | pending | runId 分页；time 不作排序证明 |
+| VJudge 分页与字段解析 | src/adapters/vjudge.js; test/adapters.test.js; test/fixtures/vjudge-status.json | yes | pending | runId 分页；time 不作排序证明；严格递减/重复页 fail-closed |
 | 边界分发与增量状态 | src/service.js; src/storage.js | yes | pending | VJudge 不接收/保存时间 boundary；损坏 state fail-soft |
-| 缓存合并语义 | src/core.js; src/storage.js; test/storage.test.js | yes | pending | 最新合法 submission ID upsert 覆盖旧月份副本 |
-| 文档与发布产物 | README.md; package.json; dist/*; scripts/* | yes | pending | 版本 0.2.17，构建/manifest 待本轮复核 |
+| 缓存合并语义 | src/core.js; src/storage.js; test/storage.test.js | yes | pending | 最新合法 submission ID upsert 覆盖旧月份副本；坏分块不阻塞 |
+| 文档与发布产物 | README.md; package.json; dist/*; scripts/* | yes | pending | 版本 0.2.18；npm run check、manifest 与可复现构建通过 |
 | 基线 | git:b09f01f2d5f08d70f8d947e9f71cd24a1c8e56f2 | yes | pending | 上游 main 基线 |
 | 验证命令 | npm test; npm run check; git diff --check; validator | pending | pending | candidate 冻结后双方独立运行 |
 
@@ -338,7 +338,7 @@ Resume-Condition: receipt or reviewer finding/decision referencing TAC-20260819-
 - Execution scope: 允许修改 /home/jimmywang0417/oj-activity-monitor 中 VJudge 适配器、服务边界分发、存储容错、相关测试、README、版本号、构建产物及本通信文档；执行者负责实现、验证、构建、提交和推送；不得写入凭据或扩大到无关重构。
 - Review boundary: Claude 独立读取当前源码、diff、测试、公开接口复现证据和构建产物；默认只读验证，可在本文件追加 reviewer 消息、finding、decision 和 ACK；不得修改交付代码或代写执行者消息。
 - Evidence base: git:b09f01f2d5f08d70f8d947e9f71cd24a1c8e56f2
-- Review candidate: sha256:c274f061af05a7fefcee847e60c7002ff027aca38c0a587f3794c690b6b933b0
+- Review candidate: sha256:65f4063b61da2812e633dda352125391b2e04b5a0147e07938be4580bfdee4d8
 - Deliverables: VJudge 非时间排序兼容实现、最新合法数据优先与损坏缓存恢复测试、README/版本及可复现构建产物、中文 Git 提交、上游推送和本文件中的双方评审闭环。
 
 ## 协作规则
@@ -423,7 +423,7 @@ Resume-Condition: receipt or reviewer finding/decision referencing TAC-20260819-
 - Execution scope: 允许修改 /home/jimmywang0417/oj-activity-monitor 中 VJudge 适配器、服务边界分发、存储容错、相关测试、README、版本号、构建产物及本通信文档；执行者负责实现、验证、构建、提交和推送；不得写入凭据或扩大到无关重构。
 - Review boundary: Claude 独立读取当前源码、diff、测试、公开接口复现证据和构建产物；默认只读验证，可在本文件追加 reviewer 消息、finding、decision 和 ACK；不得修改交付代码或代写执行者消息。
 - Evidence base: git:b09f01f2d5f08d70f8d947e9f71cd24a1c8e56f2
-- Review candidate: sha256:c274f061af05a7fefcee847e60c7002ff027aca38c0a587f3794c690b6b933b0
+- Review candidate: sha256:65f4063b61da2812e633dda352125391b2e04b5a0147e07938be4580bfdee4d8
 - Deliverables: VJudge 非时间排序兼容实现、最新合法数据优先与损坏缓存恢复测试、README/版本及可复现构建产物、中文 Git 提交、上游推送和本文件中的双方评审闭环。
 
 ## 协作规则
@@ -1520,7 +1520,7 @@ State-Check: all required items terminal; no unresolved blocker/action
 - Execution scope: 允许修改 /home/jimmywang0417/oj-activity-monitor 中 VJudge 适配器、服务边界分发、存储容错、相关测试、README、版本号、构建产物及本通信文档；执行者负责实现、验证、构建、提交和推送；不得写入凭据或扩大到无关重构。
 - Review boundary: Claude 独立读取当前源码、diff、测试、公开接口复现证据和构建产物；默认只读验证，可在本文件追加 reviewer 消息、finding、decision 和 ACK；不得修改交付代码或代写执行者消息。
 - Evidence base: git:b09f01f2d5f08d70f8d947e9f71cd24a1c8e56f2
-- Review candidate: sha256:c274f061af05a7fefcee847e60c7002ff027aca38c0a587f3794c690b6b933b0
+- Review candidate: sha256:65f4063b61da2812e633dda352125391b2e04b5a0147e07938be4580bfdee4d8
 - Deliverables: VJudge 非时间排序兼容实现、最新合法数据优先与损坏缓存恢复测试、README/版本及可复现构建产物、中文 Git 提交、上游推送和本文件中的双方评审闭环。
 
 ## 协作规则
@@ -1549,17 +1549,17 @@ State-Check: all required items terminal; no unresolved blocker/action
 | ID | 主题 | 类型 | 状态 | owner | 证据/路径 | 结论或接受条件 |
 |---|---|---|---|---|---|---|
 | TAC-Z01 | 迁移档案与当前任务边界 | evidence | accept-as-is | executor | 外层 archive 与本 task envelope | 旧事故仅作档案，不参与当前闭环 |
-| TAC-Z02 | VJudge runId 分页与 no-time-boundary | task | reviewer-action | executor | src/adapters/vjudge.js; src/service.js; tests | 乱序合法响应不 schema-changed；饱和窗口保持 partial；其它适配器保护不变 |
-| TAC-Z03 | 损坏缓存与最新合法数据优先 | task | reviewer-action | executor | src/storage.js; test/storage.test.js | 损坏 state/chunk/记录 fail-soft；同一复合身份最新合法记录覆盖旧副本 |
-| TAC-Z04 | 发布产物、中文提交与上游推送 | task | executor-action | executor | package.json; dist/*; git status/remotes | 全量验证通过后提交并推送 origin/main |
+| TAC-Z02 | VJudge runId 分页与 no-time-boundary | task | reviewer-action | executor | src/adapters/vjudge.js; src/service.js; tests | 乱序合法响应不 schema-changed；严格递减/无重复；饱和窗口保持 partial；其它适配器保护不变 |
+| TAC-Z03 | 损坏缓存与最新合法数据优先 | task | reviewer-action | executor | src/storage.js; test/storage.test.js | 损坏 state/chunk/记录 fail-soft；同一复合身份最新合法记录覆盖旧副本；合法分块与新响应共存 |
+| TAC-Z04 | 发布产物、中文提交与上游推送 | task | reviewer-action | executor | package.json; dist/*; git status/remotes | 0.2.18、eee302a、candidate 65f4063b…，npm run check 通过且已推送 origin/main |
 | TAC-Z05 | 独立评审与协议闭环 | task | reviewer-action | reviewer | 当前 handoff 与 reviewer 消息 | reviewer decision、双 ACK、goal gate 均绑定同一 candidate |
 
 ## 决议与交付
 
 - 迁移说明: 迁移前全部 task、消息和事故已置于外层 archive；当前 task 是唯一活动协议块。
-- 最终版本: version:oj-activity-monitor@0.2.17
+- 最终版本: version:oj-activity-monitor@0.2.18
 - 交付路径: src/adapters/vjudge.js; src/service.js; src/storage.js; test/adapters.test.js; test/service.test.js; test/storage.test.js; README.md; package.json; dist/*; cooperation.md
-- 验证结果: 待本轮 fresh validator、测试、构建与发布检查完成。
+- 验证结果: npm test 11 个测试文件全绿；npm run check（构建、release verifier、可复现构建、manifest）全绿；git diff --check 通过；HEAD=origin/main=eee302a；candidate=sha256:65f4063b61da2812e633dda352125391b2e04b5a0147e07938be4580bfdee4d8。
 - 未覆盖风险: VJudge 公开接口可能继续调整字段、筛选或窗口上限；若无法证明响应完整性，仍 fail closed 或 partial，不将不确定数据标为完整。
 - 双方 closing ACK: pending
 
@@ -1602,3 +1602,33 @@ For-Handoff: TAC-20260819-14/handoff/001
 Candidate: sha256:c274f061af05a7fefcee847e60c7002ff027aca38c0a587f3794c690b6b933b0
 Observation:
 等待 reviewer 对冻结候选完成独立评审；本轮验证结果保持不变，未引入新的候选或交付变更。请按 handoff 要求返回 receipt、finding 或 terminal decision。
+
+### [TAC-20260819-14][executor:004] 2026-08-20T02:20:00+08:00
+
+Message-ID: TAC-20260819-14/executor/004
+In-Reply-To: TAC-20260819-14/executor/003
+Kind: progress
+Status: ready-for-review
+Scope: TAC-Z02,TAC-Z03,TAC-Z04,TAC-Z05
+Evidence:
+- `eee302aace83f1e4b34e5445710f9ba5a0b5be85` 已推送，且 `git rev-parse HEAD` 与 `git rev-parse origin/main` 一致。
+- `npm run check` 全部通过：11 个测试文件、release verifier、reproducible build、manifest；`git diff --check` 通过。
+- 新 candidate 为 `sha256:65f4063b61da2812e633dda352125391b2e04b5a0147e07938be4580bfdee4d8`；实现包含 runId 页内/跨页严格递减与重复检测、饱和切片保守 partial、真实损坏分块共存测试；版本为 0.2.18。
+
+Observation:
+候选已发生实质变化，旧 handoff/candidate 不再适用；当前工作树干净，新的候选等待 Claude 独立读取最新代码、测试和发布产物。
+
+Next:
+以新的 superseding handoff 交给 reviewer；不再对同一 handoff 发送 ping，等待真实 receipt/finding/decision。
+
+### [TAC-20260819-14][executor:005] 2026-08-20T02:21:00+08:00
+
+Message-ID: TAC-20260819-14/executor/005
+In-Reply-To: TAC-20260819-14/executor/004
+Kind: handoff
+Handoff-ID: TAC-20260819-14/handoff/002
+Supersedes-Handoff: TAC-20260819-14/handoff/001
+To: reviewer
+Candidate: sha256:65f4063b61da2812e633dda352125391b2e04b5a0147e07938be4580bfdee4d8
+Requested-Action: independently review TAC-Z01..TAC-Z05 against the new candidate, including runId page-order/duplicate fail-closed behavior, no-time-boundary semantics, conservative saturated-window partial status, corrupted-chunk coexistence and latest-valid upsert, unchanged protections in other adapters, README/version/dist/manifest, Chinese commit, pushed origin/main, and final delivery hygiene; return finding or terminal decision
+Resume-Condition: receipt or reviewer finding/decision referencing TAC-20260819-14/handoff/002 and the exact candidate
