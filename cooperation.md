@@ -355,12 +355,12 @@ Resume-Condition: receipt or reviewer finding/decision referencing TAC-20260819-
 
 | 项目 | 路径/命令/版本 | 执行者已读 | 评审者已读 | 备注 |
 |---|---|---|---|---|
-| VJudge 分页与字段解析 | src/adapters/vjudge.js; test/adapters.test.js; test/fixtures/vjudge-status.json | yes | pending | runId 分页；time 不作排序证明 |
+| VJudge 分页与字段解析 | src/adapters/vjudge.js; test/adapters.test.js; test/fixtures/vjudge-status.json | yes | pending | runId 分页；time 不作排序证明；严格递减/重复页 fail-closed |
 | 边界分发与增量状态 | src/service.js; src/storage.js | yes | pending | VJudge 不接收/保存时间 boundary；损坏 state fail-soft |
-| 缓存合并语义 | src/core.js; src/storage.js; test/storage.test.js | yes | pending | 最新合法 submission ID upsert 覆盖旧月份副本 |
-| 文档与发布产物 | README.md; package.json; dist/*; scripts/* | yes | pending | 版本 0.2.17，构建/manifest 待本轮复核 |
+| 缓存合并语义 | src/core.js; src/storage.js; test/storage.test.js | yes | pending | 最新合法 submission ID upsert 覆盖旧月份副本；坏分块不阻塞 |
+| 文档与发布产物 | README.md; package.json; dist/*; scripts/* | yes | pending | 版本 0.2.18；npm run check、manifest 与可复现构建通过 |
 | 基线 | git:b09f01f2d5f08d70f8d947e9f71cd24a1c8e56f2 | yes | pending | 上游 main 基线 |
-| 验证命令 | npm test; npm run check; git diff --check; validator | pending | pending | candidate 冻结后双方独立运行 |
+| 验证命令 | npm test; npm run check; git diff --check; validator | yes | pending | candidate 已冻结；执行者验证完成，待 reviewer 独立复核 |
 
 ## 状态板
 
