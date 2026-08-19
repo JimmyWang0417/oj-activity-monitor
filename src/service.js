@@ -77,16 +77,17 @@ class MonitorService {
       : null;
     const fullScanDue = !Number.isFinite(previousFullScanAt) || bounds.to - previousFullScanAt >= FULL_REFRESH_INTERVAL_MS;
     const queryFrom = canIncrement && !fullScanDue ? Math.max(bounds.from, previousTo - 86400000) : bounds.from;
+    const effectiveQueryFrom = account.judge === "vjudge" ? bounds.from : queryFrom;
     const base = {
       groupId: group.id,
       accountId: account.id,
       username: account.username,
-      from: queryFrom,
+      from: effectiveQueryFrom,
       to: bounds.to,
       signal
     };
     const resumeBoundaries = Object.fromEntries(selectedScopes.map((scope, index) => [
-      scope, canIncrement && !fullScanDue && account.judge !== "atcoder" ? sourceResumeBoundary(previousTrustedStates[index]) : null
+      scope, canIncrement && !fullScanDue && !["atcoder", "vjudge"].includes(account.judge) ? sourceResumeBoundary(previousTrustedStates[index]) : null
     ]).filter(([_scope, boundary]) => boundary));
     if (account.judge === "codeforces" && selectedScopes.every((scope) => resumeBoundaries[scope])) base.resumeBoundaries = resumeBoundaries;
     else base.resumeBoundary = resumeBoundaries.default || null;
@@ -128,8 +129,10 @@ class MonitorService {
         };
       }
       if (result.coverage.complete) {
-        const previousBoundary = sourceResumeBoundary(previousTrustedByScope[result.scope]);
-        const boundary = newestResumeBoundary(result.submissions) || previousBoundary;
+        const previousBoundary = ["atcoder", "vjudge"].includes(result.judge)
+          ? null
+          : sourceResumeBoundary(previousTrustedByScope[result.scope]);
+        const boundary = result.judge === "vjudge" ? null : newestResumeBoundary(result.submissions) || previousBoundary;
         const priorFullScanAt = previousTrustedByScope[result.scope]?.diagnostics?.fullScanAt;
         result.diagnostics = {
           ...result.diagnostics,

@@ -61,6 +61,44 @@ test("partial source state preserves the last complete trusted cache", async () 
   assert.deepEqual(state.trusted, complete);
 });
 
+test("corrupt source state is replaced by the next valid state", async () => {
+  const backend = new MemoryBackend();
+  const store = new Store(backend);
+  await backend.set("oj-monitor:v1:source:g:a:vjudge:default", "corrupt");
+  await store.saveSourceState("g:a:vjudge:default", { status: "ok", coverage: { from: 1, to: 2, complete: true } });
+  assert.equal((await store.loadSourceState("g:a:vjudge:default")).status, "ok");
+});
+
+test("latest valid submission replaces an older-month copy with the same ID", async () => {
+  const store = new Store(new MemoryBackend());
+  const old = { ...item("move", "07"), judge: "vjudge", submittedAt: Date.parse("2026-07-31T23:59:00Z"), verdict: "WA", accepted: false };
+  const latest = { ...old, submittedAt: Date.parse("2026-08-01T00:01:00Z"), verdict: "AC", accepted: true };
+  await store.mergeSubmissions([old]);
+  await store.mergeSubmissions([latest]);
+  const cached = await store.loadSubmissions();
+  assert.deepEqual(cached.map((entry) => entry.submissionId), ["move"]);
+  assert.equal(cached[0].submittedAt, latest.submittedAt);
+  assert.equal(cached[0].accepted, true);
+  assert.deepEqual(await store.get("submission-index", []), ["submissions:a:vjudge:default:2026-08"]);
+});
+
+test("corrupt submission chunk does not block a newer valid response", async () => {
+  const backend = new MemoryBackend();
+  const store = new Store(backend);
+  await backend.set("oj-monitor:v1:submission-index", JSON.stringify({ schemaVersion: 1, checksum: "bad", payload: "[]" }));
+  await store.mergeSubmissions([{ ...item("fresh"), judge: "vjudge" }]);
+  assert.deepEqual((await store.loadSubmissions()).map((entry) => entry.submissionId), ["fresh"]);
+});
+
+test("malformed cached records are ignored while newer valid records remain readable", async () => {
+  const backend = new MemoryBackend();
+  const store = new Store(backend);
+  await backend.set("oj-monitor:v1:submission-index", ["submissions:a:vjudge:default:2026-08"]);
+  await backend.set("oj-monitor:v1:submissions:a:vjudge:default:2026-08", [{ broken: true }]);
+  await store.mergeSubmissions([{ ...item("valid"), judge: "vjudge" }]);
+  assert.deepEqual((await store.loadSubmissions()).map((entry) => entry.submissionId), ["valid"]);
+});
+
 test("failed atomic replacement keeps the previously committed value readable", async () => {
   class QuotaBackend extends MemoryBackend {
     constructor() { super(); this.failMainWrite = false; }

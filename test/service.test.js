@@ -173,3 +173,25 @@ test("a partial refresh keeps using the previous complete trusted source cache",
   assert.equal(seen.from, now - 1000 - 86400000);
   assert.equal(seen.resumeBoundary, null, "AtCoder continues to use its native from_second cursor");
 });
+
+test("VJudge refresh never receives a time resume boundary", async () => {
+  const store = new Store(new MemoryBackend());
+  const bounds = windowBounds(config.settings, now);
+  await store.saveSourceState("g:vj:vjudge:default", {
+    coverage: { complete: true, from: bounds.from, to: now - 1000 },
+    diagnostics: { resumeBoundary: { submissionId: "old", submittedAt: now - 2000 }, fullScanAt: now }
+  });
+  let seen;
+  const adapters = {
+    codeforces: { fetchBoth: async (base) => ({ problemset: result(base, "codeforces", "problemset"), gym: result(base, "codeforces", "gym") }) },
+    atcoder: { fetchSubmissions: async (base) => result(base, "atcoder", "default") },
+    vjudge: { fetchSubmissions: async (base) => { seen = base; return result(base, "vjudge", "default"); } }
+  };
+  const vjudgeConfig = {
+    ...config,
+    groups: [{ ...config.groups[0], accounts: [{ id: "vj", judge: "vjudge", username: "user", enabled: true }] }]
+  };
+  await new MonitorService({ store, adapters, clock: () => now }).refresh(vjudgeConfig);
+  assert.equal(seen.resumeBoundary, null);
+  assert.equal(seen.from, bounds.from);
+});

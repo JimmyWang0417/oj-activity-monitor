@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OJ Monitor
 // @namespace    https://github.com/oj-monitor/userscript
-// @version      0.2.16
+// @version      0.2.17
 // @description  在本地浏览器中按人监测多个 OJ 的近期提交与过题情况
 // @author       OJ Monitor contributors
 // @license      GPL-3.0-only
@@ -94,7 +94,7 @@ module.exports = api;
 
 },
 "package.json": function(module, exports, __require) {
-module.exports = {"name":"oj-activity-monitor","version":"0.2.16","private":true,"description":"Local-first multi-user Online Judge activity monitor for Tampermonkey","license":"GPL-3.0-only","scripts":{"build":"node scripts/build.mjs","test":"node --test test/*.test.js","manifest":"node scripts/create-manifest.mjs","check":"npm run build && npm test && node scripts/verify-release.mjs && node scripts/verify-reproducible-build.mjs && npm run manifest"},"engines":{"node":">=20"}};
+module.exports = {"name":"oj-activity-monitor","version":"0.2.17","private":true,"description":"Local-first multi-user Online Judge activity monitor for Tampermonkey","license":"GPL-3.0-only","scripts":{"build":"node scripts/build.mjs","test":"node --test test/*.test.js","manifest":"node scripts/create-manifest.mjs","check":"npm run build && npm test && node scripts/verify-release.mjs && node scripts/verify-reproducible-build.mjs && npm run manifest"},"engines":{"node":">=20"}};
 },
 "src/core.js": function(module, exports, __require) {
 "use strict";
@@ -3132,7 +3132,6 @@ const { OJMonitorError } = __require("src/core.js");
 const {
   failureResult,
   makeResult,
-  normalizeResumeBoundary,
   requireArray,
   requireFinite,
   requireText,
@@ -3204,43 +3203,17 @@ class VJudgeAdapter {
 
   async fetchSlice(options, resultFilter = "all") {
     const records = [];
-    const resumeBoundary = normalizeResumeBoundary(options.resumeBoundary);
-    let boundaryMatched = false;
-    let boundaryValid = Boolean(resumeBoundary);
-    let previousOldest = Infinity;
     for (const start of [0, 100]) {
       const page = await this.fetchPage(options, start, resultFilter);
-      let previous = Infinity;
-      let newest = -Infinity;
-      for (const record of page) {
-        const submittedAt = requireFinite(record?.time, "VJudge time");
-        if (submittedAt > previous) throw new OJMonitorError("schema-changed", "VJudge 提交不再按时间倒序排列");
-        previous = submittedAt;
-        newest = Math.max(newest, submittedAt);
-      }
-      if (newest > previousOldest) throw new OJMonitorError("schema-changed", "VJudge 跨页提交时间回跳，不能安全剪枝");
-      const oldestOnPage = page.length ? Math.min(...page.map((record) => Number(record.time))) : Infinity;
-      previousOldest = oldestOnPage;
       records.push(...page);
-      const match = boundaryValid && page.find((record) => String(record?.runId) === resumeBoundary.submissionId);
-      if (match) {
-        if (Number(match.time) !== resumeBoundary.submittedAt) {
-          boundaryValid = false;
-          boundaryMatched = false;
-        } else boundaryMatched = true;
-      }
-      if (boundaryValid && boundaryMatched && oldestOnPage < resumeBoundary.submittedAt) {
-        break;
-      }
       if (page.length < 100) break;
-      const oldest = Math.min(...page.map((record) => requireFinite(record?.time, "VJudge time")));
-      if (oldest < options.from) break;
     }
-    const relevant = records.filter((record) => Number(record.time) >= options.from && Number(record.time) <= options.to);
-    const oldest = records.length ? Math.min(...records.map((record) => Number(record.time))) : Infinity;
-    const reachedBoundary = boundaryValid && boundaryMatched && oldest < resumeBoundary.submittedAt;
-    const complete = reachedBoundary || records.length < 200 || oldest < options.from;
-    return { records: relevant, complete, totalFetched: records.length, reachedBoundary };
+    const relevant = records.filter((record) => {
+      const time = Number(record?.time);
+      return !Number.isFinite(time) || time >= options.from && time <= options.to;
+    });
+    const complete = records.length < 200;
+    return { records: relevant, complete, totalFetched: records.length };
   }
 
   async fetchSubmissions(options) {
@@ -3250,22 +3223,29 @@ class VJudgeAdapter {
       let complete = base.complete;
       let sliced = false;
       let truncatedFilters = [];
+      let invalidRecords = 0;
       const consume = (records) => {
         for (const record of records) {
-          const normalized = normalizeVJudgeSubmission(record, options);
-          byId.set(normalized.submissionId, normalized);
+          try {
+            const normalized = normalizeVJudgeSubmission(record, options);
+            byId.set(normalized.submissionId, normalized);
+          } catch (error) {
+            if (!(error instanceof OJMonitorError)) throw error;
+            invalidRecords += 1;
+          }
         }
       };
       consume(base.records);
+      if (invalidRecords) complete = false;
       if (!base.complete) {
         sliced = true;
         complete = true;
         for (const filter of RESULT_FILTERS) {
           const slice = await this.fetchSlice(options, filter);
           consume(slice.records);
-          if (!slice.complete) {
+          if (!slice.complete || invalidRecords) {
             complete = false;
-            truncatedFilters.push(filter);
+            if (!slice.complete) truncatedFilters.push(filter);
           }
         }
       }
@@ -3275,9 +3255,9 @@ class VJudgeAdapter {
         status: complete ? "ok" : "partial",
         complete,
         submissions: [...byId.values()],
-        reason: complete ? undefined : "single-filter-window-limit",
-        warning: complete ? undefined : "VJudge 仅取得部分记录（单查询窗口上限 200）",
-        diagnostics: { stopReason: complete ? (sliced ? "exhaustive-result-slices" : "base-window-covered") : "slice-truncated", sliced, truncatedFilters }
+        reason: complete ? undefined : invalidRecords ? "invalid-records" : "single-filter-window-limit",
+        warning: complete ? undefined : invalidRecords ? `VJudge 忽略 ${invalidRecords} 条无法解析的提交记录，数据可能不完整` : "VJudge 仅取得部分记录（单查询窗口上限 200）",
+        diagnostics: { stopReason: complete ? (sliced ? "exhaustive-result-slices" : "base-window-covered") : invalidRecords ? "invalid-records" : "slice-truncated", sliced, truncatedFilters, invalidRecords }
       });
     } catch (error) {
       return failureResult(options, "vjudge", "default", error, {
@@ -3613,16 +3593,17 @@ class MonitorService {
       : null;
     const fullScanDue = !Number.isFinite(previousFullScanAt) || bounds.to - previousFullScanAt >= FULL_REFRESH_INTERVAL_MS;
     const queryFrom = canIncrement && !fullScanDue ? Math.max(bounds.from, previousTo - 86400000) : bounds.from;
+    const effectiveQueryFrom = account.judge === "vjudge" ? bounds.from : queryFrom;
     const base = {
       groupId: group.id,
       accountId: account.id,
       username: account.username,
-      from: queryFrom,
+      from: effectiveQueryFrom,
       to: bounds.to,
       signal
     };
     const resumeBoundaries = Object.fromEntries(selectedScopes.map((scope, index) => [
-      scope, canIncrement && !fullScanDue && account.judge !== "atcoder" ? sourceResumeBoundary(previousTrustedStates[index]) : null
+      scope, canIncrement && !fullScanDue && !["atcoder", "vjudge"].includes(account.judge) ? sourceResumeBoundary(previousTrustedStates[index]) : null
     ]).filter(([_scope, boundary]) => boundary));
     if (account.judge === "codeforces" && selectedScopes.every((scope) => resumeBoundaries[scope])) base.resumeBoundaries = resumeBoundaries;
     else base.resumeBoundary = resumeBoundaries.default || null;
@@ -3664,8 +3645,10 @@ class MonitorService {
         };
       }
       if (result.coverage.complete) {
-        const previousBoundary = sourceResumeBoundary(previousTrustedByScope[result.scope]);
-        const boundary = newestResumeBoundary(result.submissions) || previousBoundary;
+        const previousBoundary = ["atcoder", "vjudge"].includes(result.judge)
+          ? null
+          : sourceResumeBoundary(previousTrustedByScope[result.scope]);
+        const boundary = result.judge === "vjudge" ? null : newestResumeBoundary(result.submissions) || previousBoundary;
         const priorFullScanAt = previousTrustedByScope[result.scope]?.diagnostics?.fullScanAt;
         result.diagnostics = {
           ...result.diagnostics,
@@ -4141,7 +4124,15 @@ class Store {
   }
 
   async get(name, fallback = undefined) {
-    return decodeEnvelope(await this.backend.get(this.key(name)), fallback);
+    const serialized = await this.backend.get(this.key(name));
+    try {
+      return decodeEnvelope(serialized, fallback);
+    } catch (error) {
+      if (error instanceof SyntaxError || /Storage checksum mismatch|Unsupported storage envelope/.test(error?.message || "")) {
+        return fallback;
+      }
+      throw error;
+    }
   }
 
   async setAtomic(name, value) {
@@ -4196,47 +4187,68 @@ class Store {
   }
 
   async mergeSubmissions(submissions) {
+    const incoming = mergeSubmissions([], submissions);
+    if (!incoming.length) return;
     const chunks = new Map();
-    for (const submission of submissions) {
+    for (const submission of incoming) {
       const name = this.monthChunkName(submission);
       if (!chunks.has(name)) chunks.set(name, []);
       chunks.get(name).push(submission);
     }
-    const index = new Set(await this.get("submission-index", []));
-    for (const [name, incoming] of chunks) {
-      const existing = await this.get(name, []);
-      await this.setAtomic(name, mergeSubmissions(existing, incoming));
-      index.add(name);
+    const storedIndex = await this.get("submission-index", []);
+    const index = new Set(Array.isArray(storedIndex) ? storedIndex.filter((name) => typeof name === "string") : []);
+    for (const name of chunks.keys()) index.add(name);
+    const incomingKeys = new Set(incoming.map(buildSubmissionKey));
+    for (const name of index) {
+      const storedItems = await this.get(name, []);
+      const existing = (Array.isArray(storedItems) ? storedItems : [])
+        .flatMap((item) => {
+          try { return mergeSubmissions([], [item]); } catch { return []; }
+        })
+        .filter((item) => !incomingKeys.has(buildSubmissionKey(item)));
+      const merged = mergeSubmissions(existing, chunks.get(name) || []);
+      if (merged.length || chunks.has(name)) {
+        await this.setAtomic(name, merged);
+      } else {
+        await this.delete(name);
+        index.delete(name);
+      }
     }
     await this.setAtomic("submission-index", [...index].sort());
   }
 
   async loadSubmissions(filter = {}) {
-    const names = await this.get("submission-index", []);
+    const storedIndex = await this.get("submission-index", []);
+    const names = Array.isArray(storedIndex) ? storedIndex.filter((name) => typeof name === "string") : [];
     const output = [];
     for (const name of names) {
-      const items = await this.get(name, []);
+      const storedItems = await this.get(name, []);
+      const items = Array.isArray(storedItems) ? storedItems : [];
       for (const item of items) {
-        if (filter.accountId && item.accountId !== filter.accountId) continue;
-        if (filter.judge && item.judge !== filter.judge) continue;
-        if (filter.scope && item.scope !== filter.scope) continue;
-        if (Number.isFinite(filter.from) && item.submittedAt < filter.from) continue;
-        if (Number.isFinite(filter.to) && item.submittedAt > filter.to) continue;
-        output.push(item);
+        let normalized;
+        try { normalized = mergeSubmissions([], [item])[0]; } catch { continue; }
+        if (filter.accountId && normalized.accountId !== filter.accountId) continue;
+        if (filter.judge && normalized.judge !== filter.judge) continue;
+        if (filter.scope && normalized.scope !== filter.scope) continue;
+        if (Number.isFinite(filter.from) && normalized.submittedAt < filter.from) continue;
+        if (Number.isFinite(filter.to) && normalized.submittedAt > filter.to) continue;
+        output.push(normalized);
       }
     }
     return mergeSubmissions([], output);
   }
 
   async removeAccount(accountId) {
-    const names = await this.get("submission-index", []);
+    const storedSubmissionIndex = await this.get("submission-index", []);
+    const names = Array.isArray(storedSubmissionIndex) ? storedSubmissionIndex.filter((name) => typeof name === "string") : [];
     const keep = [];
     for (const name of names) {
       if (name.startsWith(`submissions:${accountId}:`)) await this.delete(name);
       else keep.push(name);
     }
     await this.setAtomic("submission-index", keep);
-    const statNames = await this.get("stats-index", []);
+    const storedStatsIndex = await this.get("stats-index", []);
+    const statNames = Array.isArray(storedStatsIndex) ? storedStatsIndex.filter((name) => typeof name === "string") : [];
     const keepStats = [];
     for (const name of statNames) {
       const parts = name.split(":");
@@ -4253,10 +4265,12 @@ class Store {
   }
 
   async pruneSubmissions(cutoff) {
-    const names = await this.get("submission-index", []);
+    const storedIndex = await this.get("submission-index", []);
+    const names = Array.isArray(storedIndex) ? storedIndex.filter((name) => typeof name === "string") : [];
     const keep = [];
     for (const name of names) {
-      const retained = (await this.get(name, [])).filter((item) => item.submittedAt >= cutoff);
+      const storedItems = await this.get(name, []);
+      const retained = (Array.isArray(storedItems) ? storedItems : []).filter((item) => Number(item?.submittedAt) >= cutoff);
       if (retained.length) {
         await this.setAtomic(name, retained);
         keep.push(name);
@@ -4275,7 +4289,8 @@ class Store {
       if (!chunks.has(name)) chunks.set(name, []);
       chunks.get(name).push(stat);
     }
-    const index = new Set(await this.get("stats-index", []));
+    const storedIndex = await this.get("stats-index", []);
+    const index = new Set(Array.isArray(storedIndex) ? storedIndex.filter((name) => typeof name === "string") : []);
     for (const [name, incoming] of chunks) {
       const existing = await this.get(name, []);
       const merged = new Map(existing.map((item) => [[item.groupId, item.accountId, item.judge, item.scope, item.date].join(":"), item]));
@@ -4287,10 +4302,12 @@ class Store {
   }
 
   async loadDailyStats(filter = {}) {
-    const names = await this.get("stats-index", []);
+    const storedIndex = await this.get("stats-index", []);
+    const names = Array.isArray(storedIndex) ? storedIndex.filter((name) => typeof name === "string") : [];
     const stats = [];
     for (const name of names) {
-      for (const stat of await this.get(name, [])) {
+      const storedStats = await this.get(name, []);
+      for (const stat of Array.isArray(storedStats) ? storedStats : []) {
         if (filter.groupId && stat.groupId !== filter.groupId) continue;
         if (filter.accountId && stat.accountId !== filter.accountId) continue;
         if (filter.fromDate && stat.date < filter.fromDate) continue;

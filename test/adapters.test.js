@@ -161,24 +161,45 @@ test("VJudge falls back to exhaustive result slices when base reaches 200", asyn
   assert.equal(calls, RESULT_FILTERS.length + 1);
 });
 
-test("VJudge validates descending order before a trusted-boundary shortcut", async () => {
+test("VJudge follows run-id pagination even when submission times are not ordered", async () => {
   const baseRecord = (runId, time) => ({ runId, oj: "CodeForces", probNum: "1A", time, statusType: 0, processing: false, status: "Accepted" });
   const adapter = new VJudgeAdapter({ client: {}, limiter: null });
   let calls = 0;
   adapter.fetchPage = async (_options, start) => {
     calls += 1;
-    if (start === 0) return Array.from({ length: 100 }, (_unused, index) => baseRecord(200 - index, 200 - index));
+    if (start === 0) return Array.from({ length: 100 }, (_unused, index) => baseRecord(200 - index, index % 2 ? 200 - index : 1000 - index));
     return [baseRecord(100, 100), baseRecord(99, 99)];
   };
   const complete = await adapter.fetchSubmissions({ ...range, resumeBoundary: { submissionId: "100", submittedAt: 100 } });
   assert.equal(complete.status, "ok");
   assert.equal(calls, 2);
+  assert.equal(complete.coverage.complete, true);
+  assert.equal(complete.submissions.length, 102);
+});
 
-  const unordered = new VJudgeAdapter({ client: {}, limiter: null });
-  unordered.fetchPage = async () => [baseRecord(1, 1), baseRecord(2, 2)];
-  const failure = await unordered.fetchSubmissions(range);
-  assert.equal(failure.status, "schema-changed");
-  assert.equal(failure.coverage.complete, false);
+test("VJudge does not use time lower bounds to stop a saturated window", async () => {
+  const adapter = new VJudgeAdapter({ client: {}, limiter: null });
+  const page = (start) => Array.from({ length: 100 }, (_unused, index) => ({
+    runId: start + index + 1, oj: "CodeForces", probNum: "1A", time: index === 0 ? 1 : 1000000 - index,
+    statusType: 0, processing: false, status: "Accepted"
+  }));
+  const starts = [];
+  adapter.fetchPage = async (_options, start) => { starts.push(start); return page(start); };
+  const result = await adapter.fetchSubmissions({ ...range, from: 500000 });
+  assert.equal(result.status, "partial");
+  assert.deepEqual(starts, [0, 100, ...Array.from({ length: RESULT_FILTERS.length }, (_unused, index) => [0, 100]).flat()]);
+});
+
+test("VJudge keeps valid records when an individual response row is malformed", async () => {
+  const adapter = new VJudgeAdapter({ client: {}, limiter: null });
+  adapter.fetchPage = async () => [
+    { runId: 2, oj: "CodeForces", probNum: "1A", time: 2, statusType: 0, processing: false, status: "Accepted" },
+    { runId: 1, oj: "CodeForces", probNum: "1A", time: "broken", statusType: 0, processing: false, status: "Accepted" }
+  ];
+  const result = await adapter.fetchSubmissions(range);
+  assert.equal(result.status, "partial");
+  assert.equal(result.coverage.reason, "invalid-records");
+  assert.deepEqual(result.submissions.map((item) => item.submissionId), ["2"]);
 });
 
 test("Luogu content-only fixture extracts records and maps recordStatus 12 only", () => {

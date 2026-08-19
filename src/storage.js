@@ -122,7 +122,15 @@ class Store {
   }
 
   async get(name, fallback = undefined) {
-    return decodeEnvelope(await this.backend.get(this.key(name)), fallback);
+    const serialized = await this.backend.get(this.key(name));
+    try {
+      return decodeEnvelope(serialized, fallback);
+    } catch (error) {
+      if (error instanceof SyntaxError || /Storage checksum mismatch|Unsupported storage envelope/.test(error?.message || "")) {
+        return fallback;
+      }
+      throw error;
+    }
   }
 
   async setAtomic(name, value) {
@@ -177,47 +185,68 @@ class Store {
   }
 
   async mergeSubmissions(submissions) {
+    const incoming = mergeSubmissions([], submissions);
+    if (!incoming.length) return;
     const chunks = new Map();
-    for (const submission of submissions) {
+    for (const submission of incoming) {
       const name = this.monthChunkName(submission);
       if (!chunks.has(name)) chunks.set(name, []);
       chunks.get(name).push(submission);
     }
-    const index = new Set(await this.get("submission-index", []));
-    for (const [name, incoming] of chunks) {
-      const existing = await this.get(name, []);
-      await this.setAtomic(name, mergeSubmissions(existing, incoming));
-      index.add(name);
+    const storedIndex = await this.get("submission-index", []);
+    const index = new Set(Array.isArray(storedIndex) ? storedIndex.filter((name) => typeof name === "string") : []);
+    for (const name of chunks.keys()) index.add(name);
+    const incomingKeys = new Set(incoming.map(buildSubmissionKey));
+    for (const name of index) {
+      const storedItems = await this.get(name, []);
+      const existing = (Array.isArray(storedItems) ? storedItems : [])
+        .flatMap((item) => {
+          try { return mergeSubmissions([], [item]); } catch { return []; }
+        })
+        .filter((item) => !incomingKeys.has(buildSubmissionKey(item)));
+      const merged = mergeSubmissions(existing, chunks.get(name) || []);
+      if (merged.length || chunks.has(name)) {
+        await this.setAtomic(name, merged);
+      } else {
+        await this.delete(name);
+        index.delete(name);
+      }
     }
     await this.setAtomic("submission-index", [...index].sort());
   }
 
   async loadSubmissions(filter = {}) {
-    const names = await this.get("submission-index", []);
+    const storedIndex = await this.get("submission-index", []);
+    const names = Array.isArray(storedIndex) ? storedIndex.filter((name) => typeof name === "string") : [];
     const output = [];
     for (const name of names) {
-      const items = await this.get(name, []);
+      const storedItems = await this.get(name, []);
+      const items = Array.isArray(storedItems) ? storedItems : [];
       for (const item of items) {
-        if (filter.accountId && item.accountId !== filter.accountId) continue;
-        if (filter.judge && item.judge !== filter.judge) continue;
-        if (filter.scope && item.scope !== filter.scope) continue;
-        if (Number.isFinite(filter.from) && item.submittedAt < filter.from) continue;
-        if (Number.isFinite(filter.to) && item.submittedAt > filter.to) continue;
-        output.push(item);
+        let normalized;
+        try { normalized = mergeSubmissions([], [item])[0]; } catch { continue; }
+        if (filter.accountId && normalized.accountId !== filter.accountId) continue;
+        if (filter.judge && normalized.judge !== filter.judge) continue;
+        if (filter.scope && normalized.scope !== filter.scope) continue;
+        if (Number.isFinite(filter.from) && normalized.submittedAt < filter.from) continue;
+        if (Number.isFinite(filter.to) && normalized.submittedAt > filter.to) continue;
+        output.push(normalized);
       }
     }
     return mergeSubmissions([], output);
   }
 
   async removeAccount(accountId) {
-    const names = await this.get("submission-index", []);
+    const storedSubmissionIndex = await this.get("submission-index", []);
+    const names = Array.isArray(storedSubmissionIndex) ? storedSubmissionIndex.filter((name) => typeof name === "string") : [];
     const keep = [];
     for (const name of names) {
       if (name.startsWith(`submissions:${accountId}:`)) await this.delete(name);
       else keep.push(name);
     }
     await this.setAtomic("submission-index", keep);
-    const statNames = await this.get("stats-index", []);
+    const storedStatsIndex = await this.get("stats-index", []);
+    const statNames = Array.isArray(storedStatsIndex) ? storedStatsIndex.filter((name) => typeof name === "string") : [];
     const keepStats = [];
     for (const name of statNames) {
       const parts = name.split(":");
@@ -234,10 +263,12 @@ class Store {
   }
 
   async pruneSubmissions(cutoff) {
-    const names = await this.get("submission-index", []);
+    const storedIndex = await this.get("submission-index", []);
+    const names = Array.isArray(storedIndex) ? storedIndex.filter((name) => typeof name === "string") : [];
     const keep = [];
     for (const name of names) {
-      const retained = (await this.get(name, [])).filter((item) => item.submittedAt >= cutoff);
+      const storedItems = await this.get(name, []);
+      const retained = (Array.isArray(storedItems) ? storedItems : []).filter((item) => Number(item?.submittedAt) >= cutoff);
       if (retained.length) {
         await this.setAtomic(name, retained);
         keep.push(name);
@@ -256,7 +287,8 @@ class Store {
       if (!chunks.has(name)) chunks.set(name, []);
       chunks.get(name).push(stat);
     }
-    const index = new Set(await this.get("stats-index", []));
+    const storedIndex = await this.get("stats-index", []);
+    const index = new Set(Array.isArray(storedIndex) ? storedIndex.filter((name) => typeof name === "string") : []);
     for (const [name, incoming] of chunks) {
       const existing = await this.get(name, []);
       const merged = new Map(existing.map((item) => [[item.groupId, item.accountId, item.judge, item.scope, item.date].join(":"), item]));
@@ -268,10 +300,12 @@ class Store {
   }
 
   async loadDailyStats(filter = {}) {
-    const names = await this.get("stats-index", []);
+    const storedIndex = await this.get("stats-index", []);
+    const names = Array.isArray(storedIndex) ? storedIndex.filter((name) => typeof name === "string") : [];
     const stats = [];
     for (const name of names) {
-      for (const stat of await this.get(name, [])) {
+      const storedStats = await this.get(name, []);
+      for (const stat of Array.isArray(storedStats) ? storedStats : []) {
         if (filter.groupId && stat.groupId !== filter.groupId) continue;
         if (filter.accountId && stat.accountId !== filter.accountId) continue;
         if (filter.fromDate && stat.date < filter.fromDate) continue;

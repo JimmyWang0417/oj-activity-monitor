@@ -4,7 +4,6 @@ const { OJMonitorError } = require("../core");
 const {
   failureResult,
   makeResult,
-  normalizeResumeBoundary,
   requireArray,
   requireFinite,
   requireText,
@@ -76,43 +75,17 @@ class VJudgeAdapter {
 
   async fetchSlice(options, resultFilter = "all") {
     const records = [];
-    const resumeBoundary = normalizeResumeBoundary(options.resumeBoundary);
-    let boundaryMatched = false;
-    let boundaryValid = Boolean(resumeBoundary);
-    let previousOldest = Infinity;
     for (const start of [0, 100]) {
       const page = await this.fetchPage(options, start, resultFilter);
-      let previous = Infinity;
-      let newest = -Infinity;
-      for (const record of page) {
-        const submittedAt = requireFinite(record?.time, "VJudge time");
-        if (submittedAt > previous) throw new OJMonitorError("schema-changed", "VJudge 提交不再按时间倒序排列");
-        previous = submittedAt;
-        newest = Math.max(newest, submittedAt);
-      }
-      if (newest > previousOldest) throw new OJMonitorError("schema-changed", "VJudge 跨页提交时间回跳，不能安全剪枝");
-      const oldestOnPage = page.length ? Math.min(...page.map((record) => Number(record.time))) : Infinity;
-      previousOldest = oldestOnPage;
       records.push(...page);
-      const match = boundaryValid && page.find((record) => String(record?.runId) === resumeBoundary.submissionId);
-      if (match) {
-        if (Number(match.time) !== resumeBoundary.submittedAt) {
-          boundaryValid = false;
-          boundaryMatched = false;
-        } else boundaryMatched = true;
-      }
-      if (boundaryValid && boundaryMatched && oldestOnPage < resumeBoundary.submittedAt) {
-        break;
-      }
       if (page.length < 100) break;
-      const oldest = Math.min(...page.map((record) => requireFinite(record?.time, "VJudge time")));
-      if (oldest < options.from) break;
     }
-    const relevant = records.filter((record) => Number(record.time) >= options.from && Number(record.time) <= options.to);
-    const oldest = records.length ? Math.min(...records.map((record) => Number(record.time))) : Infinity;
-    const reachedBoundary = boundaryValid && boundaryMatched && oldest < resumeBoundary.submittedAt;
-    const complete = reachedBoundary || records.length < 200 || oldest < options.from;
-    return { records: relevant, complete, totalFetched: records.length, reachedBoundary };
+    const relevant = records.filter((record) => {
+      const time = Number(record?.time);
+      return !Number.isFinite(time) || time >= options.from && time <= options.to;
+    });
+    const complete = records.length < 200;
+    return { records: relevant, complete, totalFetched: records.length };
   }
 
   async fetchSubmissions(options) {
@@ -122,22 +95,29 @@ class VJudgeAdapter {
       let complete = base.complete;
       let sliced = false;
       let truncatedFilters = [];
+      let invalidRecords = 0;
       const consume = (records) => {
         for (const record of records) {
-          const normalized = normalizeVJudgeSubmission(record, options);
-          byId.set(normalized.submissionId, normalized);
+          try {
+            const normalized = normalizeVJudgeSubmission(record, options);
+            byId.set(normalized.submissionId, normalized);
+          } catch (error) {
+            if (!(error instanceof OJMonitorError)) throw error;
+            invalidRecords += 1;
+          }
         }
       };
       consume(base.records);
+      if (invalidRecords) complete = false;
       if (!base.complete) {
         sliced = true;
         complete = true;
         for (const filter of RESULT_FILTERS) {
           const slice = await this.fetchSlice(options, filter);
           consume(slice.records);
-          if (!slice.complete) {
+          if (!slice.complete || invalidRecords) {
             complete = false;
-            truncatedFilters.push(filter);
+            if (!slice.complete) truncatedFilters.push(filter);
           }
         }
       }
@@ -147,9 +127,9 @@ class VJudgeAdapter {
         status: complete ? "ok" : "partial",
         complete,
         submissions: [...byId.values()],
-        reason: complete ? undefined : "single-filter-window-limit",
-        warning: complete ? undefined : "VJudge 仅取得部分记录（单查询窗口上限 200）",
-        diagnostics: { stopReason: complete ? (sliced ? "exhaustive-result-slices" : "base-window-covered") : "slice-truncated", sliced, truncatedFilters }
+        reason: complete ? undefined : invalidRecords ? "invalid-records" : "single-filter-window-limit",
+        warning: complete ? undefined : invalidRecords ? `VJudge 忽略 ${invalidRecords} 条无法解析的提交记录，数据可能不完整` : "VJudge 仅取得部分记录（单查询窗口上限 200）",
+        diagnostics: { stopReason: complete ? (sliced ? "exhaustive-result-slices" : "base-window-covered") : invalidRecords ? "invalid-records" : "slice-truncated", sliced, truncatedFilters, invalidRecords }
       });
     } catch (error) {
       return failureResult(options, "vjudge", "default", error, {
