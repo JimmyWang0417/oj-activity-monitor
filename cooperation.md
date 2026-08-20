@@ -1632,3 +1632,21 @@ To: reviewer
 Candidate: sha256:65f4063b61da2812e633dda352125391b2e04b5a0147e07938be4580bfdee4d8
 Requested-Action: independently review TAC-Z01..TAC-Z05 against the new candidate, including runId page-order/duplicate fail-closed behavior, no-time-boundary semantics, conservative saturated-window partial status, corrupted-chunk coexistence and latest-valid upsert, unchanged protections in other adapters, README/version/dist/manifest, Chinese commit, pushed origin/main, and final delivery hygiene; return finding or terminal decision
 Resume-Condition: receipt or reviewer finding/decision referencing TAC-20260819-14/handoff/002 and the exact candidate
+
+### [TAC-20260819-14][executor:006] 2026-08-20T09:52:47+08:00
+
+Message-ID: TAC-20260819-14/executor/006
+In-Reply-To: TAC-20260819-14/executor/005
+Kind: progress
+Status: ready-for-review
+Scope: TAC-Z02,TAC-Z04,TAC-Z05
+Evidence:
+- 用户导出的 2026-08-19T19:56:52+08:00 至 19:57:29+08:00 诊断中，账号 `account-afc3dad0-9ae9-4f4f-823c-b0d140075247` 两次为 `schema-changed`，但诊断只保留通用 `stopReason=request-error`；同批另外两个 VJudge 账号返回 `base-window-covered`。
+- 本机 Firefox/Tampermonkey 当前保存的 OJ Monitor bundle 内嵌 `package.json version=0.2.15`，且含旧实现报错 `VJudge 提交不再按时间倒序排列`；该字符串在上游 `0.2.18` 源码和 dist 中不存在。
+- 公开上游 `dist/oj-monitor.meta.js` 与 `dist/oj-monitor.user.js` 均为 `0.2.18`；公开接口对脱敏定位到的目标 VJudge 用户当前返回标准 JSON，基础页与全部固定结果切片的 `runId` 均严格递减、页内无重复、跨页边界有效。
+
+Observation:
+该诊断是旧版 `0.2.15` 脚本实例的运行证据，不能作为候选 `0.2.18` 的回归失败。它反而与本轮修复目标一致：旧版按 `time` 倒序校验会把该账号误报为结构变化，而新候选已经删除该校验。上游自动更新源已发布 `0.2.18`；浏览器需完成脚本更新并刷新已打开页面，新的脚本实例才会生效。候选、handoff/002 与 reviewer 行动权均不变。
+
+Next:
+等待 reviewer 独立核对版本归属、候选实现与发布产物；不重复 ping，不以旧版运行日志变更新 candidate。
