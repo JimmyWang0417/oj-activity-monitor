@@ -1537,12 +1537,12 @@ State-Check: all required items terminal; no unresolved blocker/action
 
 | 项目 | 路径/命令/版本 | 执行者已读 | 评审者已读 | 备注 |
 |---|---|---|---|---|
-| VJudge 分页与字段解析 | src/adapters/vjudge.js; test/adapters.test.js; test/fixtures/vjudge-status.json | yes | pending | runId 分页；time 不作排序证明 |
+| VJudge 分页与字段解析 | src/adapters/vjudge.js; test/adapters.test.js; test/fixtures/vjudge-status.json | yes | pending | runId 分页；time 不作排序证明；严格递减/重复页 fail-closed |
 | 边界分发与增量状态 | src/service.js; src/storage.js | yes | pending | VJudge 不接收/保存时间 boundary；损坏 state fail-soft |
-| 缓存合并语义 | src/core.js; src/storage.js; test/storage.test.js | yes | pending | 最新合法 submission ID upsert 覆盖旧月份副本 |
-| 文档与发布产物 | README.md; package.json; dist/*; scripts/* | yes | pending | 版本 0.2.17，构建/manifest 待本轮复核 |
+| 缓存合并语义 | src/core.js; src/storage.js; test/storage.test.js | yes | pending | 最新合法 submission ID upsert 覆盖旧月份副本；坏分块不阻塞 |
+| 文档与发布产物 | README.md; package.json; dist/*; scripts/* | yes | pending | 产品版本 0.2.18；npm run check、manifest 与可复现构建通过 |
 | 基线 | git:b09f01f2d5f08d70f8d947e9f71cd24a1c8e56f2 | yes | pending | 上游 main 基线 |
-| 验证命令 | npm test; npm run check; git diff --check; validator | pending | pending | candidate 冻结后双方独立运行 |
+| 验证命令 | npm test; npm run check; git diff --check; validator | yes | pending | candidate 已冻结；执行者验证完成，待 reviewer 独立复核 |
 
 ## 状态板
 
@@ -1551,7 +1551,7 @@ State-Check: all required items terminal; no unresolved blocker/action
 | TAC-Z01 | 迁移档案与当前任务边界 | evidence | accept-as-is | executor | 外层 archive 与本 task envelope | 旧事故仅作档案，不参与当前闭环 |
 | TAC-Z02 | VJudge runId 分页与 no-time-boundary | task | reviewer-action | executor | src/adapters/vjudge.js; src/service.js; tests | 乱序合法响应不 schema-changed；严格递减/无重复；饱和窗口保持 partial；其它适配器保护不变 |
 | TAC-Z03 | 损坏缓存与最新合法数据优先 | task | reviewer-action | executor | src/storage.js; test/storage.test.js | 损坏 state/chunk/记录 fail-soft；同一复合身份最新合法记录覆盖旧副本；合法分块与新响应共存 |
-| TAC-Z04 | 发布产物、中文提交与上游推送 | task | reviewer-action | executor | package.json; dist/*; git status/remotes | 0.2.18、7aa2a9b、candidate 65f4063b…，npm run check 通过且已推送 origin/main |
+| TAC-Z04 | 发布产物、中文提交与上游推送 | task | reviewer-action | executor | package.json; dist/*; git status/remotes | 产品候选提交 eee302a；candidate 65f4063b…；后续仅含 cooperation.md 协议证据提交；均已推送 origin/main |
 | TAC-Z05 | 独立评审与协议闭环 | task | reviewer-action | reviewer | 当前 handoff 与 reviewer 消息 | reviewer decision、双 ACK、goal gate 均绑定同一 candidate |
 
 ## 决议与交付
@@ -1559,7 +1559,7 @@ State-Check: all required items terminal; no unresolved blocker/action
 - 迁移说明: 迁移前全部 task、消息和事故已置于外层 archive；当前 task 是唯一活动协议块。
 - 最终版本: version:oj-activity-monitor@0.2.18
 - 交付路径: src/adapters/vjudge.js; src/service.js; src/storage.js; test/adapters.test.js; test/service.test.js; test/storage.test.js; README.md; package.json; dist/*; cooperation.md
-- 验证结果: npm test 11 个测试文件全绿；npm run check（构建、release verifier、可复现构建、manifest）全绿；git diff --check 通过；HEAD=origin/main=7aa2a9b8c09664a17bffe4b120e20328134caaf8；candidate=sha256:65f4063b61da2812e633dda352125391b2e04b5a0147e07938be4580bfdee4d8。
+- 验证结果: 产品候选提交 eee302aace83f1e4b34e5445710f9ba5a0b5be85 的 npm test 11 个测试文件全绿；npm run check（构建、release verifier、可复现构建、manifest）全绿；git diff --check 通过；candidate=sha256:65f4063b61da2812e633dda352125391b2e04b5a0147e07938be4580bfdee4d8；其后的 main 提交仅维护 cooperation.md 协议证据，未改变 candidate 覆盖的产品文件。
 - 未覆盖风险: VJudge 公开接口可能继续调整字段、筛选或窗口上限；若无法证明响应完整性，仍 fail closed 或 partial，不将不确定数据标为完整。
 - 双方 closing ACK: pending
 
